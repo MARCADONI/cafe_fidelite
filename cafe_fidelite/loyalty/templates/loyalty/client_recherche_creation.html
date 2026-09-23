@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="container mt-4">
+    <h1>Gestion des clients</h1>
+    {% if messages %}
+  {% for message in messages %}
+    <div class="alert alert-success">
+      {{ message }}
+    </div>
+  {% endfor %}
+{% endif %}
+
+    <p>Rechercher un client à partir de son numéro de téléphone.</p>
+
+    <form method="get">
+      <div class="mb-3">
+        <label for="telephone" class="form-label">Téléphone</label>
+
+        <input
+          type="text"
+          id="telephone"
+          name="telephone"
+          class="form-control"
+          value="{{ telephone }}"
+          placeholder="Ex. : 4185551234"
+        >
+      </div>
+
+      <button type="submit" class="btn btn-primary">
+        Rechercher
+      </button>
+    </form>
+
+    {% if telephone %}
+      <hr>
+
+      {% if client %}
+        <h2>Client trouvé</h2>
+
+        <p><strong>Nom :</strong> {{ client.nom }}</p>
+        <p><strong>Téléphone :</strong> {{ client.telephone }}</p>
+        <p><strong>Courriel :</strong> {{ client.courriel|default:"Non renseigné" }}</p>
+         <a href="{% url 'loyalty:enregistrer_achat' client.id %}" class="btn btn-primary">
+            Enregistrer un achat
+          </a>
+      {% else %}
+        <p>Aucun client trouvé avec le numéro {{ telephone }}.</p>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <hr>
+
+<div class="card shadow-sm mt-5 mb-4">
+  <div class="card-body p-4">
+
+    <h2 class="card-title mb-2">Créer un nouveau client</h2>
+
+    <p class="text-muted mb-4">
+      Remplissez les informations ci-dessous pour ajouter un client au programme de fidélité.
+    </p>
+
+    <form method="post">
+      {% csrf_token %}
+
+      <div class="mb-3">
+        <label for="{{ formulaire.nom.id_for_label }}" class="form-label">
+          Nom
+        </label>
+
+        <input
+          type="text"
+          name="{{ formulaire.nom.html_name }}"
+          id="{{ formulaire.nom.id_for_label }}"
+          class="form-control"
+          placeholder="Ex. : Jean Tremblay"
+          value="{{ formulaire.nom.value|default:'' }}"
+          required
+        >
+
+        {% for error in formulaire.nom.errors %}
+          <div class="text-danger mt-1">
+            {{ error }}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-3">
+        <label for="{{ formulaire.telephone.id_for_label }}" class="form-label">
+          Téléphone
+        </label>
+
+        <input
+          type="text"
+          name="{{ formulaire.telephone.html_name }}"
+          id="{{ formulaire.telephone.id_for_label }}"
+          class="form-control"
+          placeholder="Ex. : 4185551234"
+          value="{{ formulaire.telephone.value|default:'' }}"
+          required
+        >
+
+        {% for error in formulaire.telephone.errors %}
+          <div class="text-danger mt-1">
+            {{ error }}
+          </div>
+        {% endfor %}
+      </div>
+
+      <div class="mb-4">
+        <label for="{{ formulaire.courriel.id_for_label }}" class="form-label">
+          Courriel
+        </label>
+
+        <input
+          type="email"
+          name="{{ formulaire.courriel.html_name }}"
+          id="{{ formulaire.courriel.id_for_label }}"
+          class="form-control"
+          placeholder="Ex. : jean@example.com"
+          value="{{ formulaire.courriel.value|default:'' }}"
+        >
+
+        {% for error in formulaire.courriel.errors %}
+          <div class="text-danger mt-1">
+            {{ error }}
+          </div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-success w-10">
+        Créer le client
+      </button>
+
+    </form>
+  </div>
+</div>
+{% endblock content %}
+
