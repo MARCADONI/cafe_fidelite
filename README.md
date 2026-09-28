@@ -54,8 +54,8 @@ Projet réalisé dans le cadre du cours **8INF228 — Adaptation et qualité des
 
 ## Auteurs
 
-* Marc ADONI
-* Kadiatou
+* ADONI KOUADIO AMBOF MARC CHRISTIAN ADOK25040100
+* KADIATOU LAMARANA BAH BAHK30629900
 
 ---
 
