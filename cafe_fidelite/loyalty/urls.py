@@ -12,4 +12,10 @@ urlpatterns = [
         views.enregistrer_achat,
         name="enregistrer_achat",
     ),
+
+    path(
+    "rapports/",
+    views.rapport_statistiques,
+    name="rapport_statistiques",
+),
 ]

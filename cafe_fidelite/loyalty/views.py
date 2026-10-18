@@ -12,6 +12,13 @@ from .services import (
     utiliser_recompense,
 )
 
+from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import render
+
+from .forms import RapportStatistiquesForm
+from .rapports import generer_rapport
+
 def client_recherche_creation(request):
     telephone = request.GET.get("telephone", "")
     client = None
@@ -139,3 +146,45 @@ def enregistrer_achat(request, client_id):
         contexte,
     )
 
+
+
+
+@login_required
+def rapport_statistiques(request):
+    """
+    Affiche les statistiques du cafe.
+    Acces reserve au gerant.
+    """
+
+    est_gerant = (
+        request.user.is_superuser
+        or request.user.groups.filter(
+            name="gerant"
+        ).exists()
+    )
+
+    if not est_gerant:
+        raise PermissionDenied(
+            "Acces reserve au gerant."
+        )
+
+    formulaire = RapportStatistiquesForm(
+        request.GET or None
+    )
+
+    rapport = None
+
+    if formulaire.is_valid():
+        rapport = generer_rapport(
+            formulaire.cleaned_data["date_debut"],
+            formulaire.cleaned_data["date_fin"],
+        )
+
+    return render(
+        request,
+        "loyalty/rapport_statistiques.html",
+        {
+            "formulaire": formulaire,
+            "rapport": rapport,
+        },
+    )

@@ -1,0 +1,105 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1">
+
+    <title>Rapports - Cafe Fidelite</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f6f6f6;
+            margin: 0;
+            padding: 30px;
+        }
+
+        main {
+            max-width: 950px;
+            margin: auto;
+        }
+
+        .formulaire, .carte {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px #00000012;
+        }
+
+        .formulaire {
+            margin-bottom: 25px;
+        }
+
+        .statistiques {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+        }
+
+        .carte h2 {
+            font-size: 34px;
+            margin: 10px 0;
+        }
+
+        .carte p {
+            color: #555;
+        }
+
+        button {
+            padding: 10px 18px;
+            background: #4b2e22;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+<main>
+    <h1>Rapports statistiques</h1>
+
+    <div class="formulaire">
+        <form method="get">
+            {{ formulaire.as_p }}
+            <button type="submit">
+                Generer le rapport
+            </button>
+        </form>
+    </div>
+
+    {% if rapport %}
+        <h2>
+            Du {{ rapport.date_debut|date:"d/m/Y" }}
+            au {{ rapport.date_fin|date:"d/m/Y" }}
+        </h2>
+
+        <div class="statistiques">
+            <div class="carte">
+                <p>Cafes payants</p>
+                <h2>{{ rapport.cafes_payants }}</h2>
+            </div>
+
+            <div class="carte">
+                <p>Cafes gratuits</p>
+                <h2>{{ rapport.cafes_gratuits }}</h2>
+            </div>
+
+            <div class="carte">
+                <p>Cafes prepayes</p>
+                <h2>{{ rapport.cafes_prepayes }}</h2>
+            </div>
+
+            <div class="carte">
+                <p>Cartes vendues</p>
+                <h2>{{ rapport.cartes_vendues }}</h2>
+            </div>
+        </div>
+    {% endif %}
+</main>
+</body>
+</html>
