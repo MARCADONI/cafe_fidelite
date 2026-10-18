@@ -370,6 +370,7 @@ Ces règles sont susceptibles d'évoluer davantage que l'affichage des pages.
 Par exemple, si le programme passe plus tard de :
 
 ```text
+
 10 cafés → 1 récompense
 ```
 
@@ -501,3 +502,295 @@ views.py
 ```
 
 permet de modifier les règles métier et d'ajouter de nouvelles fonctionnalités sans concentrer toute la logique dans une seule classe ou une seule vue.
+
+# Conception — Évolution vers la version 2
+
+## 1. Objectif
+
+La version 2 de Café Fidélité étend la version 1 sans remplacer ses fonctionnalités existantes.
+
+Elle introduit six nouvelles capacités :
+
+1. Annulation des transactions.
+2. Rapports statistiques.
+3. Configuration des règles de fidélité.
+4. Effacement des renseignements personnels.
+5. Fusion des fiches clients.
+6. Authentification et permissions des employés.
+
+L'application continue de fonctionner localement avec Django et SQLite. Aucun paiement n'est traité.
+
+## 2. Architecture générale
+
+L'application conserve une architecture séparant les responsabilités :
+
+- **Modèles Django** : représentation des données persistantes.
+- **Services métier** : règles de fidélité, annulations, fusions et statistiques.
+- **Vues Django** : réception des requêtes et contrôle d'accès.
+- **Formulaires Django** : validation des données saisies.
+- **Templates** : présentation des interfaces.
+- **Tests automatisés** : vérification des règles d'affaires.
+
+Les opérations modifiant plusieurs enregistrements seront exécutées de manière atomique.
+
+## 3. Modèles de données
+
+### 3.1 Client
+
+Le modèle `Client` conserve ses informations existantes :
+
+- `id`
+- `nom`
+- `telephone`
+- `courriel`
+- `date_creation`
+
+De nouveaux champs permettront de distinguer les clients actifs, anonymisés et fusionnés.
+
+Les renseignements personnels seront effacés lors d'une anonymisation. Une fiche anonymisée ne pourra plus être utilisée pour effectuer des opérations.
+
+### 3.2 Fidelite
+
+Le modèle `Fidelite` conserve :
+
+- `client`
+- `progression`
+- `recompenses`
+
+Un mécanisme supplémentaire permettra de représenter les dettes d'étampes résultant de certaines annulations.
+
+Les soldes existants de la v1 seront conservés pendant la migration.
+
+### 3.3 Achat
+
+Le modèle `Achat` conserve :
+
+- `client`
+- `type_achat`
+- `carte_prepayee`
+- `date_achat`
+
+Il sera enrichi afin de conserver :
+
+- L'employé responsable de l'achat.
+- L'état d'annulation.
+- Les informations nécessaires pour retrouver la règle de fidélité applicable.
+- Les données nécessaires aux corrections des soldes.
+
+Les achats provenant de la v1 ne seront pas attribués artificiellement à un employé.
+
+### 3.4 CartePrepayee
+
+Le modèle `CartePrepayee` conserve :
+
+- `client`
+- `cafes_restants`
+- `date_emission`
+- `active`
+
+La v2 permettra de distinguer une carte épuisée, une carte annulée et une carte clôturée après anonymisation.
+
+Chaque carte conservera son propre solde, y compris après une fusion de clients.
+
+### 3.5 RegleFidelite
+
+Ce nouveau modèle permettra de configurer le programme de fidélité.
+
+Champs prévus :
+
+- `id`
+- `seuil`
+- `date_entree_vigueur`
+- `date_creation`
+- `cree_par`
+
+Les anciennes règles seront conservées pour interpréter les transactions historiques.
+
+### 3.6 Annulation
+
+Ce nouveau modèle conservera la trace des annulations.
+
+Champs prévus :
+
+- `id`
+- `achat` ou référence à l'opération annulée
+- `gerant`
+- `motif`
+- `date_annulation`
+
+La référence devra également permettre l'annulation de l'émission d'une carte prépayée.
+
+Une opération ne pourra être annulée qu'une seule fois.
+
+### 3.7 EmissionCarte
+
+Ce modèle représentera explicitement la vente ou l'émission d'une carte prépayée.
+
+Champs prévus :
+
+- `id`
+- `carte`
+- `employe`
+- `date_emission`
+
+Il permettra de produire les rapports de cartes vendues et de tracer leurs annulations.
+
+Pour les cartes créées en v1, la migration reconstruira les enregistrements nécessaires à partir des données disponibles, sans inventer l'identité de l'employé.
+
+### 3.8 FusionClient
+
+Ce modèle enregistrera les opérations de fusion.
+
+Champs prévus :
+
+- `id`
+- `client_principal`
+- `client_secondaire`
+- `gerant`
+- `date_fusion`
+
+Les références historiques devront être conçues pour rester compatibles avec l'anonymisation ultérieure des clients.
+
+### 3.9 Employés
+
+Nous utiliserons le modèle utilisateur intégré de Django.
+
+Deux groupes seront configurés :
+
+- `barista`
+- `gerant`
+
+Les permissions seront vérifiées côté serveur.
+
+Les gérants pourront effectuer les opérations quotidiennes ainsi que les opérations sensibles.
+
+## 4. Relations principales
+
+- Un client possède un compte de fidélité au maximum.
+- Un client peut posséder plusieurs achats.
+- Un client peut posséder plusieurs cartes prépayées.
+- Une carte prépayée peut être associée à plusieurs achats de type `PREPAYE`.
+- Une carte possède un enregistrement d'émission.
+- Un achat peut être annulé au maximum une fois.
+- Une émission de carte peut être annulée au maximum une fois.
+- Un employé peut enregistrer plusieurs transactions.
+- Un gérant peut effectuer plusieurs annulations et fusions.
+- Plusieurs règles de fidélité peuvent se succéder dans le temps.
+
+## 5. Stratégie compteurs et historique
+
+Nous conservons une architecture hybride.
+
+Les compteurs permettent une consultation rapide des soldes actuels.
+
+L'historique permet de produire des rapports, de retracer les opérations et de comprendre les annulations.
+
+Les compteurs existants de la v1 sont préservés comme état initial de référence.
+
+À partir de la v2, les modifications des compteurs et de l'historique doivent rester synchronisées.
+
+Cette décision est documentée dans l'ADR-0001.
+
+## 6. Principales règles métier
+
+### Annulations
+
+Une annulation ne supprime pas physiquement l'opération.
+
+Elle conserve le gérant responsable, la date et le motif.
+
+Les soldes sont corrigés en fonction du type d'opération annulée.
+
+### Rapports
+
+Les rapports sont calculés sur une période choisie par le gérant.
+
+Les transactions annulées sont exclues des totaux nets.
+
+Une annulation tardive corrige les rapports de la période d'origine.
+
+### Règles de fidélité
+
+Le seuil est configurable avec une date d'entrée en vigueur.
+
+Les étampes déjà accumulées et les récompenses acquises sont conservées.
+
+### Anonymisation
+
+Les renseignements personnels du client sont effacés.
+
+Les statistiques historiques restent inchangées.
+
+Les avantages non utilisés sont clôturés selon la procédure prévue.
+
+### Fusion
+
+Le gérant choisit la fiche principale.
+
+Les étampes, les récompenses et les cartes sont conservées.
+
+L'historique des achats reste exploitable.
+
+### Permissions
+
+Les baristas effectuent les opérations courantes.
+
+Les gérants peuvent également effectuer les opérations sensibles.
+
+Toutes les pages du comptoir nécessitent une authentification.
+
+## 7. Stratégie de migration v1 vers v2
+
+Les migrations de la version 1 ne seront ni supprimées ni modifiées.
+
+De nouvelles migrations ajouteront les champs et les modèles nécessaires.
+
+Les nouvelles relations vers les employés devront accepter une valeur nulle pour les anciennes opérations.
+
+La migration devra notamment :
+
+1. Conserver tous les clients existants.
+2. Conserver les compteurs de fidélité.
+3. Conserver les soldes des cartes prépayées.
+4. Conserver les achats historiques.
+5. Initialiser la règle de fidélité historique à 10 étampes.
+6. Reconstituer les émissions de cartes existantes à partir des informations disponibles.
+7. Ajouter les structures de traçabilité sans réinitialiser les soldes.
+
+La commande `python manage.py balances` permettra de vérifier les soldes avant et après la migration.
+
+Les résultats de cette vérification seront documentés dans `docs/migration.md`.
+
+## 8. Qualité et tests
+
+Les tests automatisés couvriront les règles de la v1 et les six nouvelles demandes.
+
+Ils vérifieront notamment :
+
+- La conservation des soldes après migration.
+- L'attribution des récompenses.
+- La consommation des cartes prépayées.
+- Les annulations et leurs effets.
+- Les rapports statistiques.
+- Les changements de seuil.
+- L'anonymisation des clients.
+- La fusion des fiches.
+- Les permissions des employés.
+
+Les tests pourront être exécutés avec :
+
+`python manage.py test`
+
+## 9. Décisions architecturales
+
+Les décisions sont documentées dans :
+
+- `docs/adr/0001-compteurs-et-historique.md`
+- `docs/adr/0002-annulation-transactions.md`
+- `docs/adr/0003-rapports-statistiques.md`
+- `docs/adr/0004-regles-fidelite-configurables.md`
+- `docs/adr/0005-effacement-clients.md`
+- `docs/adr/0006-fusion-clients.md`
+- `docs/adr/0007-roles-et-permissions.md`
+
+Ces documents précisent les choix retenus, les alternatives écartées et les conséquences de chaque décision.
