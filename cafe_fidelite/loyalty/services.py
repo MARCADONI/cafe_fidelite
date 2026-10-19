@@ -7,7 +7,12 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from .models import Achat, Fidelite, RegleFidelite,Annulation,MouvementFidelite,CartePrepayee,EmissionCarte
+from django.contrib.auth.models import Group
+
+from cafe_fidelite.loyalty.models import Client
+
+
+from .models import Achat, Fidelite, RegleFidelite,Annulation,MouvementFidelite,CartePrepayee,EmissionCarte,FusionClient,JournalAudit
 
 
 
@@ -18,6 +23,11 @@ def enregistrer_achat_payant(client, employe=None):
     Enregistre un achat payant et memorise
     ses effets sur les compteurs de fidelite.
     """
+    client = Client.objects.select_for_update().get(
+        pk=client.pk
+    )
+
+    verifier_client_actif(client)
 
     if client.est_anonymise or client.est_fusionne:
         raise ValueError(
@@ -121,6 +131,11 @@ def utiliser_recompense(client, employe=None):
     Conserve l'achat et le mouvement
     dans l'historique.
     """
+    client = Client.objects.select_for_update().get(
+        pk=client.pk
+    )
+
+    verifier_client_actif(client)
 
     if client.est_anonymise or client.est_fusionne:
         raise ValueError(
@@ -174,6 +189,12 @@ def emettre_carte_prepayee(client, employe=None):
     et conserve la transaction de vente.
     """
 
+    client = Client.objects.select_for_update().get(
+    pk=client.pk
+)
+
+    verifier_client_actif(client)
+
     if client.est_anonymise or client.est_fusionne:
         raise ValueError(
             "Ce client ne peut plus recevoir de carte."
@@ -207,6 +228,11 @@ def utiliser_carte_prepayee(carte, employe=None):
     """
     Consomme un cafe sur une carte prepayee.
     """
+    client = Client.objects.select_for_update().get(
+    pk=carte.client_id
+    )
+
+    verifier_client_actif(client)
 
     if employe is not None and not employe.is_authenticated:
         raise ValueError(
@@ -312,11 +338,23 @@ def programmer_regle_fidelite(
             "La date d'entree en vigueur doit etre future."
         )
 
-    return RegleFidelite.objects.create(
+        regle = RegleFidelite.objects.create(
         seuil=seuil,
         date_entree_vigueur=date_entree_vigueur,
         cree_par=gerant,
     )
+
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.REGLE_FIDELITE,
+        objet_id=regle.pk,
+        description=(
+            f"Programmation du seuil de fidelite "
+            f"a {seuil} etampes."
+        ),
+    )
+
+    return regle
 
 
 
@@ -410,6 +448,16 @@ def annuler_achat_payant(achat_id, gerant, motif):
         variation_etampes=variation_etampes,
         variation_dette=variation_dette,
         commentaire="Correction d'un achat payant",
+    )
+
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANNULATION_ACHAT,
+        objet_id=achat.pk,
+        description=(
+            f"Annulation de l'achat #{achat.pk}. "
+            f"Motif : {motif.strip()}"
+        ),
     )
 
     return annulation
@@ -600,7 +648,15 @@ def annuler_utilisation_recompense(
         commentaire="Annulation d'un cafe gratuit",
     )
 
-
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANNULATION_RECOMPENSE,
+        objet_id=achat.pk,
+        description=(
+            f"Annulation de la recompense "
+            f"utilisee dans l'achat #{achat.pk}."
+        ),
+    )
 
     return annulation
 
@@ -782,4 +838,337 @@ def annuler_vente_carte(
         motif=motif.strip(),
     )
 
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANNULATION_CARTE,
+        objet_id=emission.pk,
+        description=(
+            f"Annulation d'une consommation "
+            f"prepayee : achat #{carte.pk}."
+        ),
+    )
+
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANNULATION_CARTE,
+        objet_id=emission.pk,
+        description=(
+            f"Annulation de la vente "
+            f"de carte #{carte.pk}."
+        ),
+    )
+
     return annulation
+
+
+
+
+
+
+def verifier_client_actif(client):
+    """
+    Verifie qu'un compte client peut encore
+    recevoir des operations.
+    """
+
+    if client.est_fusionne:
+        raise ValueError(
+            "Ce compte a ete fusionne. "
+            "Utilisez le compte principal."
+        )
+
+    if client.est_anonymise:
+        raise ValueError(
+            "Ce compte a ete anonymise."
+        )
+
+    return True
+
+
+@transaction.atomic
+def fusionner_clients(
+    client_principal_id,
+    client_secondaire_id,
+    gerant,
+):
+    """
+    Fusionne deux comptes clients.
+
+    - Le compte principal est conserve.
+    - Le compte secondaire est marque comme fusionne.
+    - Les soldes de fidelite sont regroupes.
+    - Les cartes prepayees sont transferees.
+    - Les achats historiques restent attribues
+      au compte d'origine.
+    - Les mouvements de fusion sont enregistres.
+    """
+
+    # 1. Verifier les permissions du gerant
+    if (
+        not gerant
+        or not gerant.is_authenticated
+        or not (
+            gerant.is_superuser
+            or gerant.groups.filter(
+                name="Gerant"
+            ).exists()
+        )
+    ):
+        raise PermissionError(
+            "Seul un gerant peut fusionner des clients."
+        )
+
+    # 2. Empecher la fusion avec soi-meme
+    if client_principal_id == client_secondaire_id:
+        raise ValueError(
+            "Impossible de fusionner un client avec lui-meme."
+        )
+
+    # 3. Recuperer et verrouiller les clients
+    # dans un ordre stable
+    clients = {
+        client.pk: client
+        for client in (
+            Client.objects.select_for_update()
+            .filter(
+                pk__in=[
+                    client_principal_id,
+                    client_secondaire_id,
+                ]
+            )
+            .order_by("pk")
+        )
+    }
+
+    if len(clients) != 2:
+        raise ValueError(
+            "Un des comptes clients est introuvable."
+        )
+
+    principal = clients[client_principal_id]
+    secondaire = clients[client_secondaire_id]
+
+    # 4. Verifier l'etat des comptes
+    if principal.est_fusionne or secondaire.est_fusionne:
+        raise ValueError(
+            "Un des comptes est deja fusionne."
+        )
+
+    if principal.est_anonymise or secondaire.est_anonymise:
+        raise ValueError(
+            "Impossible de fusionner un compte anonymise."
+        )
+
+    # 5. Recuperer et verrouiller les soldes
+    fidelites = {
+        fidelite.client_id: fidelite
+        for fidelite in (
+            Fidelite.objects.select_for_update()
+            .filter(
+                client_id__in=[
+                    principal.pk,
+                    secondaire.pk,
+                ]
+            )
+            .order_by("client_id")
+        )
+    }
+
+    if len(fidelites) != 2:
+        raise ValueError(
+            "Un des comptes ne possede pas "
+            "de solde de fidelite."
+        )
+
+    fidelite_principale = fidelites[principal.pk]
+    fidelite_secondaire = fidelites[secondaire.pk]
+
+    # 6. Memoriser les soldes avant la fusion
+    etampes_transferees = (
+        fidelite_secondaire.progression
+    )
+
+    recompenses_transferees = (
+        fidelite_secondaire.recompenses
+    )
+
+    dette_transferee = (
+        fidelite_secondaire.dette_etampes
+    )
+
+    # 7. Regrouper les soldes de fidelite
+    fidelite_principale.progression += (
+        etampes_transferees
+    )
+
+    fidelite_principale.recompenses += (
+        recompenses_transferees
+    )
+
+    fidelite_principale.dette_etampes += (
+        dette_transferee
+    )
+
+    fidelite_principale.save(
+        update_fields=[
+            "progression",
+            "recompenses",
+            "dette_etampes",
+        ]
+    )
+
+    # 8. Remettre le solde secondaire a zero
+    fidelite_secondaire.progression = 0
+    fidelite_secondaire.recompenses = 0
+    fidelite_secondaire.dette_etampes = 0
+
+    fidelite_secondaire.save(
+        update_fields=[
+            "progression",
+            "recompenses",
+            "dette_etampes",
+        ]
+    )
+
+    # 9. Transferer les cartes prepayees
+    CartePrepayee.objects.filter(
+        client=secondaire
+    ).update(
+        client=principal
+    )
+
+    # 10. Marquer le compte secondaire
+    # comme fusionne
+    secondaire.est_fusionne = True
+    secondaire.fusionne_vers = principal
+
+    secondaire.save(
+        update_fields=[
+            "est_fusionne",
+            "fusionne_vers",
+        ]
+    )
+
+    # 11. Enregistrer la fusion UNE SEULE FOIS
+    fusion = FusionClient.objects.create(
+        client_principal=principal,
+        client_secondaire=secondaire,
+        gerant=gerant,
+    )
+
+    # 12. Enregistrer le mouvement sortant
+    # du compte secondaire
+    MouvementFidelite.objects.create(
+        client=secondaire,
+        type_mouvement=(
+            MouvementFidelite.TypeMouvement.FUSION
+        ),
+        variation_etampes=-etampes_transferees,
+        variation_recompenses=-recompenses_transferees,
+        variation_dette=-dette_transferee,
+        commentaire=(
+            f"Fusion #{fusion.pk} : transfert "
+            f"vers le client #{principal.pk}"
+        ),
+    )
+
+    # 13. Enregistrer le mouvement entrant
+    # sur le compte principal
+    MouvementFidelite.objects.create(
+        client=principal,
+        type_mouvement=(
+            MouvementFidelite.TypeMouvement.FUSION
+        ),
+        variation_etampes=etampes_transferees,
+        variation_recompenses=recompenses_transferees,
+        variation_dette=dette_transferee,
+        commentaire=(
+            f"Fusion #{fusion.pk} : transfert "
+            f"depuis le client #{secondaire.pk}"
+        ),
+    )
+
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.FUSION,
+        objet_id=fusion.pk,
+        description=(
+            f"Fusion du client #{secondaire.pk} "
+            f"vers le client #{principal.pk}"
+        ),
+    )
+
+    # 14. Retourner l'enregistrement de fusion
+    return fusion
+
+
+
+@transaction.atomic
+def anonymiser_client(client_id, gerant):
+    """
+    Anonymise les informations personnelles
+    d'un client sans supprimer ses achats.
+    """
+
+    # 1. Verifier les permissions
+    if (
+        not gerant
+        or not gerant.is_authenticated
+        or not (
+            gerant.is_superuser
+            or gerant.groups.filter(
+                name="Gerant"
+            ).exists()
+        )
+    ):
+        raise PermissionError(
+            "Seul un gerant peut anonymiser un client."
+        )
+
+    # 2. Recuperer et verrouiller le client
+    client = Client.objects.select_for_update().get(
+        pk=client_id
+    )
+
+    # 3. Refuser une anonymisation repetee
+    if client.est_anonymise:
+        raise ValueError(
+            "Ce client est deja anonymise."
+        )
+
+    # 4. Refuser un compte deja fusionne
+    if client.est_fusionne:
+        raise ValueError(
+            "Impossible d'anonymiser un compte fusionne."
+        )
+
+    # 5. Effacer les informations personnelles
+    client.nom = "Client anonymise"
+    client.telephone = None
+    client.courriel = ""
+
+    # 6. Marquer le compte comme anonymise
+    client.est_anonymise = True
+    client.date_anonymisation = timezone.now()
+
+    # 7. Sauvegarder les modifications
+    client.save(
+        update_fields=[
+            "nom",
+            "telephone",
+            "courriel",
+            "est_anonymise",
+            "date_anonymisation",
+        ]
+    )
+
+
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANONYMISATION,
+        objet_id=client.pk,
+        description=(
+            f"Anonymisation du client #{client.pk}"
+        ),
+    )
+    return client

@@ -1,0 +1,77 @@
+
+{% extends "base.html" %}
+
+{% block title %}
+Anonymisation d'un client
+{% endblock title %}
+
+{% block content %}
+
+<div class="container py-4">
+
+    <h1>Anonymisation d'un client</h1>
+
+    <p>
+        Cette operation est reservee au gerant.
+    </p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-success">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card mt-4">
+        <div class="card-body">
+
+            <form method="post">
+                {% csrf_token %}
+
+                {{ form.non_field_errors }}
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        Client a anonymiser
+                    </label>
+
+                    {{ form.client }}
+                    {{ form.client.errors }}
+                </div>
+
+                <div class="alert alert-warning">
+                    <strong>Attention :</strong>
+                    cette operation efface les
+                    informations personnelles du client.
+
+                    Les achats et les cartes prepayees
+                    seront conserves.
+                </div>
+
+                <div class="mb-3">
+                    {{ form.confirmation }}
+
+                    <label>
+                        Je confirme vouloir anonymiser
+                        ce client.
+                    </label>
+
+                    {{ form.confirmation.errors }}
+                </div>
+
+                <button
+                    type="submit"
+                    class="btn btn-danger"
+                >
+                    Confirmer l'anonymisation
+                </button>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

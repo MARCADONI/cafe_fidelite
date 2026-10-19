@@ -383,3 +383,58 @@ class MouvementFidelite(models.Model):
             f"Mouvement #{self.pk} - "
             f"{self.type_mouvement}"
         )
+
+
+
+class JournalAudit(models.Model):
+
+    class TypeAction(models.TextChoices):
+        FUSION = "FUSION", "Fusion de clients"
+        ANONYMISATION = "ANONYMISATION", "Anonymisation"
+        ANNULATION_ACHAT = "ANNULATION_ACHAT", "Annulation d'achat"
+        ANNULATION_RECOMPENSE = (
+            "ANNULATION_RECOMPENSE",
+            "Annulation de recompense"
+        )
+        ANNULATION_CARTE = (
+            "ANNULATION_CARTE",
+            "Annulation de carte"
+        )
+        REGLE_FIDELITE = (
+            "REGLE_FIDELITE",
+            "Modification de regle"
+        )
+
+    utilisateur = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
+    action = models.CharField(
+        max_length=30,
+        choices=TypeAction.choices,
+    )
+
+    objet_id = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    description = models.TextField(
+        blank=True,
+    )
+
+    date_action = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = ["-date_action"]
+
+    def __str__(self):
+        return (
+            f"{self.get_action_display()} "
+            f"- {self.date_action}"
+        )

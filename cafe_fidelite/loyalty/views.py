@@ -4,7 +4,7 @@ from django.shortcuts import redirect
 from django.shortcuts import render
 
 from .forms import ClientForm
-from .models import CartePrepayee, Client, Fidelite
+from .models import CartePrepayee, Client, Fidelite,JournalAudit
 from .services import (
     emettre_carte_prepayee,
     enregistrer_achat_payant,
@@ -14,10 +14,19 @@ from .services import (
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import render
+from django.shortcuts import render,redirect
 
 from .forms import RapportStatistiquesForm
 from .rapports import generer_rapport
+
+from django.contrib.auth.models import Group
+from django.shortcuts import render, redirect
+
+from cafe_fidelite.loyalty.forms import FusionClientForm
+from cafe_fidelite.loyalty.services import fusionner_clients
+
+from cafe_fidelite.loyalty.forms import AnonymisationClientForm
+from cafe_fidelite.loyalty.services import anonymiser_client
 
 def client_recherche_creation(request):
     telephone = request.GET.get("telephone", "")
@@ -186,5 +195,167 @@ def rapport_statistiques(request):
         {
             "formulaire": formulaire,
             "rapport": rapport,
+        },
+    )
+
+
+
+@login_required
+def fusion_clients(request):
+    """
+    Interface de fusion reservee au gerant.
+    """
+
+    # 1. Verifier les permissions
+    est_gerant = (
+        request.user.is_superuser
+        or request.user.groups.filter(
+            name="Gerant"
+        ).exists()
+    )
+
+    if not est_gerant:
+        raise PermissionDenied(
+            "Acces reserve au gerant."
+        )
+
+    # 2. Traiter le formulaire
+    if request.method == "POST":
+        form = FusionClientForm(request.POST)
+
+        if form.is_valid():
+            principal = form.cleaned_data[
+                "client_principal"
+            ]
+
+            secondaire = form.cleaned_data[
+                "client_secondaire"
+            ]
+
+            try:
+                fusion = fusionner_clients(
+                    client_principal_id=principal.pk,
+                    client_secondaire_id=secondaire.pk,
+                    gerant=request.user,
+                )
+
+            except (ValueError, PermissionError) as erreur:
+                form.add_error(
+                    None,
+                    str(erreur),
+                )
+
+            else:
+                messages.success(
+                    request,
+                    (
+                        "Fusion effectuee avec succes. "
+                        f"Reference : #{fusion.pk}."
+                    ),
+                )
+
+                return redirect(
+                    "loyalty:fusion_clients"
+                )
+
+    else:
+        form = FusionClientForm()
+
+    # 3. Afficher le formulaire
+    return render(
+        request,
+        "loyalty/fusion_clients.html",
+        {
+            "form": form,
+        },
+    )
+
+
+
+
+@login_required
+def anonymisation_client(request):
+    """
+    Interface d'anonymisation reservee au gerant.
+    """
+
+    # 1. Verifier les permissions
+    est_gerant = (
+        request.user.is_superuser
+        or request.user.groups.filter(
+            name="Gerant"
+        ).exists()
+    )
+
+    if not est_gerant:
+        raise PermissionDenied(
+            "Acces reserve au gerant."
+        )
+
+    # 2. Traiter le formulaire
+    if request.method == "POST":
+        form = AnonymisationClientForm(request.POST)
+
+        if form.is_valid():
+            client = form.cleaned_data["client"]
+
+            try:
+                anonymiser_client(
+                    client_id=client.pk,
+                    gerant=request.user,
+                )
+
+            except (ValueError, PermissionError) as erreur:
+                form.add_error(None, str(erreur))
+
+            else:
+                messages.success(
+                    request,
+                    "Le client a ete anonymise avec succes.",
+                )
+
+                return redirect(
+                    "loyalty:anonymisation_client"
+                )
+
+    else:
+        form = AnonymisationClientForm()
+
+    # 3. Afficher la page
+    return render(
+        request,
+        "loyalty/anonymisation_client.html",
+        {
+            "form": form,
+        },
+    )
+
+
+
+@login_required
+def journal_audit(request):
+    """
+    Affiche le journal des operations sensibles.
+    Accessible uniquement aux gerants.
+    """
+
+    if not request.user.groups.filter(
+        name="Gerant"
+    ).exists():
+        raise PermissionDenied(
+            "Acces reserve au gerant."
+        )
+
+    journaux = (
+        JournalAudit.objects
+        .select_related("utilisateur")
+        .all()[:100]
+    )
+
+    return render(
+        request,
+        "loyalty/journal_audit.html",
+        {
+            "journaux": journaux,
         },
     )

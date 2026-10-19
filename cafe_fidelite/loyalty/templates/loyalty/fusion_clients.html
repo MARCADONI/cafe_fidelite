@@ -1,0 +1,86 @@
+
+{% extends "base.html" %}
+
+{% block title %}
+Fusion des clients
+{% endblock title %}
+
+{% block content %}
+
+<div class="container py-4">
+
+    <h1>Fusion des comptes clients</h1>
+
+    <p>
+        Cette operation est reservee au gerant.
+    </p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-success">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card mt-4">
+        <div class="card-body">
+
+            <form method="post">
+                {% csrf_token %}
+
+                {{ form.non_field_errors }}
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        Client principal
+                    </label>
+
+                    {{ form.client_principal }}
+
+                    {{ form.client_principal.errors }}
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">
+                        Client secondaire
+                    </label>
+
+                    {{ form.client_secondaire }}
+
+                    {{ form.client_secondaire.errors }}
+                </div>
+
+                <div class="alert alert-warning">
+                    Attention : les soldes et les
+                    cartes prepayees seront transferes
+                    vers le client principal.
+                    Le compte secondaire sera marque
+                    comme fusionne.
+                </div>
+
+                <div class="mb-3">
+                    {{ form.confirmation }}
+
+                    <label>
+                        Je confirme la fusion.
+                    </label>
+
+                    {{ form.confirmation.errors }}
+                </div>
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
+                >
+                    Confirmer la fusion
+                </button>
+
+            </form>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock content %}

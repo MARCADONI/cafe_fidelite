@@ -31,6 +31,9 @@ from cafe_fidelite.loyalty.models import (
     CartePrepayee,
     EmissionCarte,
     RegleFidelite,
+    FusionClient,
+    JournalAudit,
+    
 )
 
 
@@ -48,6 +51,10 @@ from cafe_fidelite.loyalty.services import (
     utiliser_carte_prepayee,
     annuler_utilisation_carte,
     annuler_vente_carte,
+    fusionner_clients,
+    anonymiser_client,
+    enregistrer_achat_payant,
+    verifier_client_actif,
 )
 
 
@@ -681,3 +688,1140 @@ class RapportStatistiquesTests(TestCase):
             "rapport",
             reponse.context,
         )
+
+
+
+class FusionClientTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_fusion",
+            password="Test12345!"
+        )
+
+        self.employe = User.objects.create_user(
+            username="employe_fusion",
+            password="Test12345!"
+        )
+
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.gerant.groups.add(groupe_gerant)
+
+        self.principal = Client.objects.create(
+            nom="Alice",
+            telephone="1111111111",
+            courriel="alice@example.com"
+        )
+
+        self.secondaire = Client.objects.create(
+            nom="Alice Dupont",
+            telephone="2222222222",
+            courriel="alice2@example.com"
+        )
+
+        self.fidelite_principale = (
+            Fidelite.objects.get_or_create(
+                client=self.principal
+            )[0]
+        )
+
+        self.fidelite_secondaire = (
+            Fidelite.objects.get_or_create(
+                client=self.secondaire
+            )[0]
+        )
+
+        self.fidelite_principale.progression = 7
+        self.fidelite_principale.recompenses = 1
+        self.fidelite_principale.dette_etampes = 0
+        self.fidelite_principale.save()
+
+        self.fidelite_secondaire.progression = 2
+        self.fidelite_secondaire.recompenses = 2
+        self.fidelite_secondaire.dette_etampes = 1
+        self.fidelite_secondaire.save()
+
+    def test_fusion_additionne_les_soldes(self):
+        fusion = fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant
+        )
+
+        self.fidelite_principale.refresh_from_db()
+        self.fidelite_secondaire.refresh_from_db()
+        self.secondaire.refresh_from_db()
+
+        self.assertEqual(
+            self.fidelite_principale.progression,
+            9
+        )
+
+        self.assertEqual(
+            self.fidelite_principale.recompenses,
+            3
+        )
+
+        self.assertEqual(
+            self.fidelite_principale.dette_etampes,
+            1
+        )
+
+        self.assertEqual(
+            self.fidelite_secondaire.progression,
+            0
+        )
+
+        self.assertEqual(
+            self.fidelite_secondaire.recompenses,
+            0
+        )
+
+        self.assertTrue(
+            self.secondaire.est_fusionne
+        )
+
+        self.assertEqual(
+            self.secondaire.fusionne_vers,
+            self.principal
+        )
+
+        self.assertEqual(
+            fusion.gerant,
+            self.gerant
+        )
+
+    def test_fusion_transfere_les_cartes(self):
+        carte = CartePrepayee.objects.create(
+            client=self.secondaire,
+            cafes_restants=8,
+            active=True
+        )
+
+        fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant
+        )
+
+        carte.refresh_from_db()
+
+        self.assertEqual(
+            carte.client,
+            self.principal
+        )
+
+        self.assertEqual(
+            carte.cafes_restants,
+            8
+        )
+
+    def test_impossible_fusionner_avec_soi_meme(self):
+        with self.assertRaises(ValueError):
+            fusionner_clients(
+                self.principal.id,
+                self.principal.id,
+                self.gerant
+            )
+
+        self.assertEqual(
+            FusionClient.objects.count(),
+            0
+        )
+
+    def test_impossible_fusionner_deux_fois(self):
+        fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant
+        )
+
+        with self.assertRaises(ValueError):
+            fusionner_clients(
+                self.principal.id,
+                self.secondaire.id,
+                self.gerant
+            )
+
+        self.assertEqual(
+            FusionClient.objects.count(),
+            1
+        )
+
+    def test_employe_ne_peut_pas_fusionner(self):
+        with self.assertRaises(PermissionError):
+            fusionner_clients(
+                self.principal.id,
+                self.secondaire.id,
+                self.employe
+            )
+
+        self.fidelite_principale.refresh_from_db()
+
+        self.assertEqual(
+            self.fidelite_principale.progression,
+            7
+        )
+
+        self.assertEqual(
+            FusionClient.objects.count(),
+            0
+        )
+
+    def test_fusion_conserve_historique_achats(self):
+        achat = Achat.objects.create(
+            client=self.secondaire,
+            type_achat=Achat.TypeAchat.PAYANT
+        )
+
+        fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant
+        )
+
+        achat.refresh_from_db()
+
+        self.assertEqual(
+            achat.client,
+            self.secondaire
+        )
+
+        self.assertTrue(
+            Achat.objects.filter(
+                pk=achat.pk
+            ).exists()
+        )
+
+    
+    def test_fusion_cree_mouvements_compensatoires(self):
+        fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant,
+        )
+
+        mouvements = MouvementFidelite.objects.filter(
+            type_mouvement=(
+                MouvementFidelite.TypeMouvement.FUSION
+            )
+        )
+
+        self.assertEqual(mouvements.count(), 2)
+
+        self.assertEqual(
+            sum(m.variation_etampes for m in mouvements),
+            0,
+        )
+
+        self.assertEqual(
+            sum(m.variation_recompenses for m in mouvements),
+            0,
+        )
+
+        self.assertEqual(
+            sum(m.variation_dette for m in mouvements),
+            0,
+        )
+
+    def test_compte_fusionne_refuse_nouvel_achat(self):
+        fusionner_clients(
+            self.principal.id,
+            self.secondaire.id,
+            self.gerant,
+        )
+
+        self.secondaire.refresh_from_db()
+
+        with self.assertRaises(ValueError):
+            enregistrer_achat_payant(
+                self.secondaire
+            )
+
+
+
+class FusionClientInterfaceTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_interface",
+            password="Test12345!",
+        )
+
+        self.barista = User.objects.create_user(
+            username="barista_interface",
+            password="Test12345!",
+        )
+
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.gerant.groups.add(groupe_gerant)
+
+        self.principal = Client.objects.create(
+            nom="Alice",
+            telephone="3333333333",
+        )
+
+        self.secondaire = Client.objects.create(
+            nom="Alice Dupont",
+            telephone="4444444444",
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.principal
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.secondaire
+        )
+
+        self.url = reverse(
+            "loyalty:fusion_clients"
+        )
+
+    def test_gerant_peut_ouvrir_page(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            200
+        )
+
+    def test_barista_ne_peut_pas_ouvrir_page(self):
+        self.client.force_login(self.barista)
+
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            403
+        )
+
+    def test_utilisateur_non_connecte_est_redirige(self):
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            302
+        )
+
+    def test_gerant_peut_fusionner_clients(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "client_principal": self.principal.pk,
+                "client_secondaire": self.secondaire.pk,
+                "confirmation": "on",
+            },
+        )
+
+        self.assertEqual(
+            reponse.status_code,
+            302
+        )
+
+        self.secondaire.refresh_from_db()
+
+        self.assertTrue(
+            self.secondaire.est_fusionne
+        )
+
+        self.assertEqual(
+            self.secondaire.fusionne_vers_id,
+            self.principal.pk
+        )
+
+        self.assertEqual(
+            FusionClient.objects.count(),
+            1
+        )
+
+    def test_formulaire_refuse_meme_client(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "client_principal": self.principal.pk,
+                "client_secondaire": self.principal.pk,
+                "confirmation": "on",
+            },
+        )
+
+        self.assertEqual(
+            reponse.status_code,
+            200
+        )
+
+        self.assertEqual(
+            FusionClient.objects.count(),
+            0
+        )
+
+        self.assertTrue(
+            reponse.context["form"].errors
+        )
+
+
+
+class AnonymisationClientTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        # Creer un gerant
+        self.gerant = User.objects.create_user(
+            username="gerant_anonymisation",
+            password="Test12345!",
+        )
+
+        # Creer un barista
+        self.barista = User.objects.create_user(
+            username="barista_anonymisation",
+            password="Test12345!",
+        )
+
+        # Attribuer le role de gerant
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.gerant.groups.add(groupe_gerant)
+
+        # Creer un client
+        self.client_test = Client.objects.create(
+            nom="Alice Dupont",
+            telephone="5551234567",
+            courriel="alice@example.com",
+        )
+
+        # Creer son compte de fidelite
+        Fidelite.objects.get_or_create(
+            client=self.client_test
+        )
+
+    def test_anonymisation_efface_donnees_personnelles(self):
+        anonymiser_client(
+            self.client_test.pk,
+            self.gerant,
+        )
+
+        self.client_test.refresh_from_db()
+
+        self.assertEqual(
+            self.client_test.nom,
+            "Client anonymise",
+        )
+
+        self.assertIsNone(
+            self.client_test.telephone
+        )
+
+        self.assertEqual(
+            self.client_test.courriel,
+            "",
+        )
+
+        self.assertTrue(
+            self.client_test.est_anonymise
+        )
+
+        self.assertIsNotNone(
+            self.client_test.date_anonymisation
+        )
+
+    def test_anonymisation_conserve_achats(self):
+        achat = Achat.objects.create(
+            client=self.client_test,
+            type_achat=Achat.TypeAchat.PAYANT,
+        )
+
+        anonymiser_client(
+            self.client_test.pk,
+            self.gerant,
+        )
+
+        achat.refresh_from_db()
+
+        self.assertEqual(
+            achat.client_id,
+            self.client_test.pk,
+        )
+
+        self.assertTrue(
+            Achat.objects.filter(
+                pk=achat.pk
+            ).exists()
+        )
+
+    def test_barista_ne_peut_pas_anonymiser(self):
+        with self.assertRaises(PermissionError):
+            anonymiser_client(
+                self.client_test.pk,
+                self.barista,
+            )
+
+        self.client_test.refresh_from_db()
+
+        self.assertFalse(
+            self.client_test.est_anonymise
+        )
+
+        self.assertEqual(
+            self.client_test.nom,
+            "Alice Dupont",
+        )
+
+    def test_impossible_anonymiser_deux_fois(self):
+        anonymiser_client(
+            self.client_test.pk,
+            self.gerant,
+        )
+
+        with self.assertRaises(ValueError):
+            anonymiser_client(
+                self.client_test.pk,
+                self.gerant,
+            )
+
+    def test_impossible_anonymiser_compte_fusionne(self):
+        principal = Client.objects.create(
+            nom="Alice Principale",
+            telephone="5559876543",
+        )
+
+        Fidelite.objects.get_or_create(
+            client=principal
+        )
+
+        fusionner_clients(
+            principal.pk,
+            self.client_test.pk,
+            self.gerant,
+        )
+
+        with self.assertRaises(ValueError):
+            anonymiser_client(
+                self.client_test.pk,
+                self.gerant,
+            )
+
+    def test_anonymisation_conserve_cartes(self):
+        carte = CartePrepayee.objects.create(
+            client=self.client_test,
+            cafes_restants=8,
+            active=True,
+        )
+
+        anonymiser_client(
+            self.client_test.pk,
+            self.gerant,
+        )
+
+        carte.refresh_from_db()
+
+        self.assertEqual(
+            carte.client_id,
+            self.client_test.pk,
+        )
+
+        self.assertEqual(
+            carte.cafes_restants,
+            8,
+        )
+
+        self.assertTrue(
+            CartePrepayee.objects.filter(
+                pk=carte.pk
+            ).exists()
+        )
+
+
+
+class AnonymisationClientInterfaceTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_interface_anonymisation",
+            password="Test12345!",
+        )
+
+        self.barista = User.objects.create_user(
+            username="barista_interface_anonymisation",
+            password="Test12345!",
+        )
+
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.gerant.groups.add(groupe_gerant)
+
+        self.client_test = Client.objects.create(
+            nom="Alice Dupont",
+            telephone="5551234567",
+            courriel="alice@example.com",
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.client_test
+        )
+
+        self.url = reverse(
+            "loyalty:anonymisation_client"
+        )
+
+    def test_gerant_peut_ouvrir_page(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            200
+        )
+
+    def test_barista_ne_peut_pas_ouvrir_page(self):
+        self.client.force_login(self.barista)
+
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            403
+        )
+
+    def test_utilisateur_non_connecte_est_redirige(self):
+        reponse = self.client.get(self.url)
+
+        self.assertEqual(
+            reponse.status_code,
+            302
+        )
+
+    def test_gerant_peut_anonymiser_client(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "client": self.client_test.pk,
+                "confirmation": "on",
+            },
+        )
+
+        self.assertEqual(
+            reponse.status_code,
+            302
+        )
+
+        self.client_test.refresh_from_db()
+
+        self.assertTrue(
+            self.client_test.est_anonymise
+        )
+
+        self.assertEqual(
+            self.client_test.nom,
+            "Client anonymise"
+        )
+
+        self.assertIsNone(
+            self.client_test.telephone
+        )
+
+    def test_confirmation_obligatoire(self):
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "client": self.client_test.pk,
+            },
+        )
+
+        self.assertEqual(
+            reponse.status_code,
+            200
+        )
+
+        self.client_test.refresh_from_db()
+
+        self.assertFalse(
+            self.client_test.est_anonymise
+        )
+
+        self.assertTrue(
+            reponse.context["form"].errors
+        )
+
+    def test_client_deja_anonymise_est_refuse(self):
+        self.client_test.est_anonymise = True
+        self.client_test.save(
+            update_fields=["est_anonymise"]
+        )
+
+        self.client.force_login(self.gerant)
+
+        reponse = self.client.post(
+            self.url,
+            {
+                "client": self.client_test.pk,
+                "confirmation": "on",
+            },
+        )
+
+        self.assertEqual(
+            reponse.status_code,
+            200
+        )
+
+        self.assertTrue(
+            reponse.context["form"].errors
+        )
+
+        self.client_test.refresh_from_db()
+
+        self.assertTrue(
+            self.client_test.est_anonymise
+        )
+
+
+
+class ProtectionClientInactifTests(TestCase):
+
+    def setUp(self):
+        self.client_test = Client.objects.create(
+            nom="Client Test",
+            telephone="5551112222",
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.client_test
+        )
+
+    def test_client_actif_est_accepte(self):
+        resultat = verifier_client_actif(
+            self.client_test
+        )
+
+        self.assertTrue(resultat)
+
+    def test_client_anonymise_est_refuse(self):
+        self.client_test.est_anonymise = True
+        self.client_test.save(
+            update_fields=["est_anonymise"]
+        )
+
+        with self.assertRaises(ValueError):
+            verifier_client_actif(
+                self.client_test
+            )
+
+    def test_client_fusionne_est_refuse(self):
+        self.client_test.est_fusionne = True
+        self.client_test.save(
+            update_fields=["est_fusionne"]
+        )
+
+        with self.assertRaises(ValueError):
+            verifier_client_actif(
+                self.client_test
+            )
+
+    def test_achat_client_anonymise_est_refuse(self):
+        self.client_test.est_anonymise = True
+        self.client_test.save(
+            update_fields=["est_anonymise"]
+        )
+
+        with self.assertRaises(ValueError):
+            enregistrer_achat_payant(
+                self.client_test
+            )
+
+        self.assertEqual(
+            Achat.objects.filter(
+                client=self.client_test
+            ).count(),
+            0
+        )
+
+    def test_achat_client_fusionne_est_refuse(self):
+        self.client_test.est_fusionne = True
+        self.client_test.save(
+            update_fields=["est_fusionne"]
+        )
+
+        with self.assertRaises(ValueError):
+            enregistrer_achat_payant(
+                self.client_test
+            )
+
+        self.assertEqual(
+            Achat.objects.filter(
+                client=self.client_test
+            ).count(),
+            0
+        )
+
+
+
+class JournalAuditTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_audit",
+            password="Test12345!",
+        )
+
+    def test_creation_journal_audit(self):
+        """
+        Verifie qu'une entree d'audit peut etre creee.
+        """
+
+        journal = JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.FUSION,
+            objet_id=10,
+            description="Fusion de clients",
+        )
+
+        self.assertEqual(
+            journal.action,
+            JournalAudit.TypeAction.FUSION,
+        )
+
+        self.assertEqual(
+            journal.utilisateur,
+            self.gerant,
+        )
+
+        self.assertEqual(journal.objet_id, 10)
+
+    def test_date_action_automatique(self):
+        """
+        Verifie que la date est ajoutee automatiquement.
+        """
+
+        journal = JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.ANONYMISATION,
+            objet_id=20,
+        )
+
+        self.assertIsNotNone(journal.date_action)
+
+    def test_utilisateur_facultatif(self):
+        """
+        Verifie qu'une entree reste possible
+        sans utilisateur associe.
+        """
+
+        journal = JournalAudit.objects.create(
+            utilisateur=None,
+            action=JournalAudit.TypeAction.ANNULATION_ACHAT,
+            objet_id=30,
+        )
+
+        self.assertIsNone(journal.utilisateur)
+
+        self.assertEqual(
+            JournalAudit.objects.count(),
+            1,
+        )
+
+    def test_affichage_journal(self):
+        """
+        Verifie la representation textuelle du journal.
+        """
+
+        journal = JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.REGLE_FIDELITE,
+            objet_id=40,
+        )
+
+        affichage = str(journal)
+
+        self.assertIn(
+            "Modification de regle",
+            affichage,
+        )
+
+
+
+class JournalAuditIntegrationTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_integration",
+            password="Test12345!",
+        )
+
+        groupe, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+        self.gerant.groups.add(groupe)
+
+        self.client1 = Client.objects.create(
+            nom="Client Principal",
+            telephone="1111111111",
+        )
+
+        self.client2 = Client.objects.create(
+            nom="Client Secondaire",
+            telephone="2222222222",
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.client1
+        )
+
+        Fidelite.objects.get_or_create(
+            client=self.client2
+        )
+
+    def test_fusion_cree_journal_audit(self):
+        """
+        Une fusion reussie doit etre journalisee.
+        """
+
+        nombre_avant = JournalAudit.objects.count()
+
+        fusionner_clients(
+            client_principal_id=self.client1.pk,
+            client_secondaire_id=self.client2.pk,
+            gerant=self.gerant,
+        )
+
+        self.assertEqual(
+            JournalAudit.objects.count(),
+            nombre_avant + 1,
+        )
+
+        self.assertTrue(
+            JournalAudit.objects.filter(
+                action=JournalAudit.TypeAction.FUSION,
+            ).exists()
+        )
+
+    def test_anonymisation_cree_journal_audit(self):
+        """
+        Une anonymisation reussie doit etre journalisee.
+        """
+
+        nombre_avant = JournalAudit.objects.count()
+
+        anonymiser_client(
+            client_id=self.client1.pk,
+            gerant=self.gerant,
+        )
+
+        self.assertEqual(
+            JournalAudit.objects.count(),
+            nombre_avant + 1,
+        )
+
+        self.assertTrue(
+            JournalAudit.objects.filter(
+                action=JournalAudit.TypeAction.ANONYMISATION,
+                objet_id=self.client1.pk,
+            ).exists()
+        )
+
+    def test_fusion_refusee_ne_cree_pas_audit(self):
+        """
+        Une fusion invalide ne doit pas produire
+        d'audit de fusion reussie.
+        """
+
+        nombre_avant = JournalAudit.objects.count()
+
+        with self.assertRaises(ValueError):
+            fusionner_clients(
+                client_principal_id=self.client1.pk,
+                client_secondaire_id=self.client1.pk,
+                gerant=self.gerant,
+            )
+
+        self.assertEqual(
+            JournalAudit.objects.count(),
+            nombre_avant,
+        )
+
+    def test_anonymisation_refusee_ne_cree_pas_audit(self):
+        """
+        Une deuxieme anonymisation doit etre refusee
+        sans creer un nouvel audit.
+        """
+
+        anonymiser_client(
+            client_id=self.client1.pk,
+            gerant=self.gerant,
+        )
+
+        nombre_avant = JournalAudit.objects.count()
+
+        with self.assertRaises(ValueError):
+            anonymiser_client(
+                client_id=self.client1.pk,
+                gerant=self.gerant,
+            )
+
+        self.assertEqual(
+            JournalAudit.objects.count(),
+            nombre_avant,
+        )
+
+
+class JournalAuditInterfaceTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_audit_interface",
+            password="Test12345!",
+        )
+
+        self.employe = User.objects.create_user(
+            username="employe_audit_interface",
+            password="Test12345!",
+        )
+
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.gerant.groups.add(groupe_gerant)
+
+        self.url = reverse("loyalty:journal_audit")
+
+    def test_gerant_peut_consulter_journal(self):
+        """
+        Un gerant peut consulter le journal.
+        """
+
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertTemplateUsed(
+            response,
+            "loyalty/journal_audit.html",
+        )
+
+    def test_employe_ne_peut_pas_consulter_journal(self):
+        """
+        Un employe ordinaire doit recevoir HTTP 403.
+        """
+
+        self.client.force_login(self.employe)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_utilisateur_non_connecte_est_redirige(self):
+        """
+        Un visiteur non connecte doit etre redirige.
+        """
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 302)
+
+        self.assertIn(
+            "next=",
+            response["Location"],
+        )
+
+    def test_journal_affiche_operations(self):
+        """
+        Les operations enregistrees doivent apparaitre.
+        """
+
+        JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.FUSION,
+            objet_id=15,
+            description="Fusion de deux clients",
+        )
+
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(
+            response,
+            "Fusion de deux clients",
+        )
+
+        self.assertContains(
+            response,
+            "Fusion de clients",
+        )
+
+    def test_journal_affiche_plus_recent_en_premier(self):
+        """
+        Les operations recentes apparaissent en premier.
+        """
+
+        ancien = JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.FUSION,
+            objet_id=10,
+            description="Operation ancienne",
+        )
+
+        recent = JournalAudit.objects.create(
+            utilisateur=self.gerant,
+            action=JournalAudit.TypeAction.ANONYMISATION,
+            objet_id=20,
+            description="Operation recente",
+        )
+
+        maintenant = timezone.now()
+
+        JournalAudit.objects.filter(
+            pk=ancien.pk
+        ).update(
+            date_action=maintenant - timezone.timedelta(days=2)
+        )
+
+        JournalAudit.objects.filter(
+            pk=recent.pk
+        ).update(
+            date_action=maintenant
+        )
+
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(self.url)
+
+        journaux = list(response.context["journaux"])
+
+        self.assertEqual(journaux[0].pk, recent.pk)
+        self.assertEqual(journaux[1].pk, ancien.pk)

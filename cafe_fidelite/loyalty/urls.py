@@ -18,4 +18,21 @@ urlpatterns = [
     views.rapport_statistiques,
     name="rapport_statistiques",
 ),
+
+    path(
+    "fusion/",
+    views.fusion_clients,
+    name="fusion_clients",
+),
+    path(
+    "anonymisation/",
+    views.anonymisation_client,
+    name="anonymisation_client",
+),
+
+    path(
+    "audit/",
+    views.journal_audit,
+    name="journal_audit",
+),
 ]

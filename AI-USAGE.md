@@ -151,3 +151,134 @@ Les fonctionnalités ont été vérifiées manuellement pendant le développemen
 * vérification de l'historique dans Django Admin.
 
 L'utilisation de l'intelligence artificielle ne remplace donc pas la vérification du fonctionnement de l'application par les membres de l'équipe.
+
+
+# Utilisation de l'intelligence artificielle — Devoir 2
+
+## 1. Contexte
+
+Dans le cadre du Devoir 2 du cours 8INF228 — Adaptation et qualité des applications, nous avons continué à utiliser ChatGPT d'OpenAI comme outil d'assistance au développement et à l'évolution de Café Fidélité.
+
+L'utilisation de cet outil a principalement concerné la compréhension des nouvelles exigences, la conception des fonctionnalités, l'implémentation, le débogage, les tests et la documentation.
+
+## 2. Analyse des nouvelles exigences
+
+ChatGPT a été utilisé pour analyser les six nouvelles demandes :
+
+- Annulation des transactions.
+- Production de rapports statistiques.
+- Modification des règles de fidélité.
+- Effacement des renseignements personnels.
+- Fusion des fiches clients.
+- Gestion des employés et des permissions.
+
+L'outil a contribué à identifier les impacts de ces fonctionnalités sur les modèles existants, les services métier et les interfaces Django.
+
+## 3. Assistance à la conception
+
+ChatGPT a participé à la réflexion sur plusieurs décisions d'architecture, notamment :
+
+- La conservation des compteurs et de l'historique des transactions.
+- La gestion des effets des annulations.
+- La préservation des données lors des migrations.
+- La séparation entre les opérations métier et les contrôles d'accès.
+- La traçabilité des modifications sensibles.
+
+L'outil a également aidé à structurer les documents ADR et à expliciter les avantages, les inconvénients et les compromis des décisions retenues.
+
+## 4. Assistance à l'implémentation
+
+ChatGPT a fourni des explications et des propositions de code pour faire évoluer l'application Django.
+
+Les principales fonctionnalités concernées sont :
+
+### Annulations
+
+Assistance à la conception et à l'implémentation des mécanismes d'annulation des achats payants, des récompenses et des opérations liées aux cartes prépayées.
+
+### Règles de fidélité
+
+Assistance à la gestion des seuils de fidélité configurables et de leur application aux transactions.
+
+### Gestion des clients
+
+Assistance à la mise en œuvre de la fusion des fiches clients et de l'anonymisation des renseignements personnels.
+
+### Sécurité
+
+Assistance à l'utilisation de l'authentification Django et des groupes d'utilisateurs pour protéger les fonctionnalités réservées aux gérants.
+
+### Traçabilité
+
+Assistance à l'intégration des modèles `MouvementFidelite` et `JournalAudit`.
+
+## 5. Assistance aux tests automatisés
+
+ChatGPT a été utilisé pour proposer des scénarios de tests Django couvrant notamment :
+
+- Les opérations de fidélité.
+- Les annulations et leurs conséquences.
+- La fusion des clients.
+- L'anonymisation.
+- Les contrôles d'accès.
+- Le journal d'audit.
+
+L'outil a également été utilisé pour analyser les messages d'erreur produits lors de l'exécution des tests.
+
+La suite de tests comportait 64 tests lors de la dernière exécution connue. La réussite complète de cette suite reste à confirmer après les corrections.
+
+## 6. Débogage et limites rencontrées
+
+L'assistance de ChatGPT a été utile pour identifier certaines erreurs, mais les propositions générées n'étaient pas toujours directement adaptées au code existant.
+
+Par exemple, des difficultés ont été rencontrées avec :
+
+- Des références à des variables non définies.
+- Des propositions utilisant des noms de champs différents de ceux des modèles Django existants.
+- Des problèmes d'indentation dans les fichiers Python.
+- La préparation des données nécessaires à certains tests.
+
+Ces situations ont montré la nécessité de confronter les propositions de l'IA au code réel et aux résultats des tests.
+
+## 7. Assistance à la documentation
+
+ChatGPT a contribué à la préparation et à la mise à jour des documents suivants :
+
+- `README.md`.
+- `docs/Conception.md`.
+- `docs/migration.md`.
+- Le document de rétrospective.
+- Les sept décisions d'architecture du dossier `docs/ADR/`.
+- `AI-USAGE.md`.
+
+Cette assistance a notamment permis de structurer les explications, de présenter les décisions techniques et d'identifier les éléments restant à vérifier.
+
+## 8. Exemples de demandes adressées à ChatGPT
+
+Les échanges ont notamment porté sur des questions telles que :
+
+> Comment annuler une transaction sans perdre son historique ?
+
+> Comment conserver la cohérence des compteurs de fidélité après une annulation ?
+
+> Comment fusionner deux comptes clients tout en préservant leurs avantages ?
+
+> Comment anonymiser les renseignements personnels sans supprimer les statistiques historiques ?
+
+> Comment protéger une interface Django pour qu'elle soit accessible uniquement aux gérants ?
+
+> Comment enregistrer les opérations sensibles dans un journal d'audit ?
+
+> Comment organiser et exécuter les tests automatisés Django ?
+
+> Comment documenter les décisions d'architecture et les migrations du projet ?
+
+## 9. Vérification et responsabilité
+
+Les propositions de l'intelligence artificielle ont servi de support au développement.
+
+Le code et les recommandations ont été intégrés progressivement dans le projet, puis examinés à l'aide des outils Django et des tests disponibles.
+
+Les membres de l'équipe demeurent responsables des décisions retenues, de la validation du comportement de l'application et du contenu remis dans le cadre du devoir.
+
+L'intelligence artificielle a constitué un outil d'assistance, et non une garantie de correction ou de conformité aux exigences.

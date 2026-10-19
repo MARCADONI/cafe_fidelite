@@ -793,4 +793,96 @@ Les décisions sont documentées dans :
 - `docs/adr/0006-fusion-clients.md`
 - `docs/adr/0007-roles-et-permissions.md`
 
+
+## 10. Traçabilité et audit des opérations — Version 2
+
+### 10.1 Objectif
+
+La version 2 de Café Fidélité introduit des mécanismes supplémentaires de traçabilité afin de faciliter la vérification des opérations et l'analyse des modifications effectuées dans le système.
+
+Deux modèles participent à cette démarche : `MouvementFidelite` et `JournalAudit`.
+
+### 10.2 Modèle MouvementFidelite
+
+Le modèle `MouvementFidelite` permet de conserver un historique des mouvements associés au programme de fidélité.
+
+Il complète les compteurs de fidélité existants en permettant de retracer les changements liés aux opérations métier.
+
+Cette approche contribue à distinguer :
+
+- L'état actuel du compte de fidélité.
+- L'historique des mouvements ayant contribué à cet état.
+
+Elle facilite la compréhension des corrections et des opérations d'annulation.
+
+### 10.3 Modèle JournalAudit
+
+Le modèle `JournalAudit` conserve une trace des opérations sensibles réalisées dans l'application.
+
+Ses principaux attributs sont :
+
+| Attribut | Rôle |
+|---|---|
+| `utilisateur` | Utilisateur responsable de l'action |
+| `action` | Type d'opération réalisée |
+| `objet_id` | Identifiant de l'objet concerné, lorsqu'il est disponible |
+| `description` | Description de l'opération |
+| `date_action` | Date et heure de l'enregistrement |
+
+Les actions auditées comprennent notamment :
+
+- La fusion de clients.
+- L'anonymisation de clients.
+- Les annulations de transactions.
+- La programmation des règles de fidélité.
+
+Le journal est conservé dans la base de données et peut être consulté à partir de l'interface de gestion prévue à cet effet.
+
+### 10.4 Contrôle d'accès au journal
+
+La consultation du journal d'audit est réservée aux utilisateurs authentifiés disposant du rôle de gérant.
+
+Les autorisations sont vérifiées côté serveur dans les vues Django.
+
+Un utilisateur authentifié ne possédant pas le rôle requis ne peut pas consulter le journal.
+
+### 10.5 Architecture de la traçabilité
+
+Le mécanisme repose sur la séparation entre les services métier et la persistance des données.
+
+```text
+Utilisateur
+    |
+    v
+Vue Django
+    |
+    v
+Service métier
+    |
+    +----> Modification des données
+    |
+    +----> MouvementFidelite
+    |
+    +----> JournalAudit
+                |
+                v
+              SQLite
+```
+
+Les services métier centralisent les opérations et leur traçabilité.
+
+Le journal d'audit ne remplace pas l'historique des achats ou les mouvements de fidélité : il apporte une information complémentaire sur les actions administratives sensibles.
+
+### 10.6 Bénéfices pour la qualité logicielle
+
+Cette architecture contribue à :
+
+- Améliorer la traçabilité des opérations.
+- Faciliter le diagnostic des anomalies.
+- Identifier l'utilisateur responsable d'une action.
+- Conserver un historique des opérations sensibles.
+- Renforcer la vérifiabilité du comportement de l'application.
+
+Ces mécanismes participent à l'amélioration de la maintenabilité et de la qualité du système.
+
 Ces documents précisent les choix retenus, les alternatives écartées et les conséquences de chaque décision.

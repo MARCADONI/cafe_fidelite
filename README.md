@@ -673,3 +673,109 @@ System check identified no issues (0 silenced).
 # 22. Version
 
 Ce dépôt correspond au **Devoir 1 — Système de fidélité pour un café, version 1** du cours **8INF228 — Adaptation et qualité des applications**.
+
+
+# Devoir 2 — Évolution et qualité de Café Fidélité
+
+## 23. Présentation du Devoir 2
+
+Le Devoir 2 du cours **8INF228 — Adaptation et qualité des applications** consiste à faire évoluer l'application Café Fidélité en intégrant de nouvelles fonctionnalités métier, des mécanismes de contrôle et des améliorations de qualité logicielle.
+
+L'évolution du système repose sur l'architecture Django existante, notamment la séparation entre les modèles, les services métier, les vues et les interfaces HTML.
+
+## 24. Fonctionnalités ajoutées
+
+### 24.1 Gestion des annulations
+
+Le système prend en charge l'annulation de certaines opérations :
+
+- Achat payant.
+- Utilisation d'une récompense de fidélité.
+- Utilisation d'une carte prépayée.
+- Vente d'une carte prépayée.
+
+Les services métier appliquent les règles nécessaires pour gérer les conséquences de ces annulations.
+
+### 24.2 Gestion avancée des clients
+
+Deux opérations administratives ont été ajoutées :
+
+**Fusion des clients :** regrouper les données de deux comptes clients selon les règles métier.
+
+**Anonymisation :** protéger les données personnelles d'un client en anonymisant son compte.
+
+Les comptes fusionnés ou anonymisés ne peuvent plus effectuer les opérations métier interdites par leur état.
+
+### 24.3 Gestion des règles de fidélité
+
+Le système permet de programmer des modifications des règles de fidélité.
+
+Les informations liées aux règles appliquées sont conservées afin d'améliorer la traçabilité des opérations.
+
+### 24.4 Rapports statistiques
+
+Une interface de rapports permet aux utilisateurs autorisés de consulter des informations de gestion.
+
+Adresse : `/clients/rapports/`
+
+### 24.5 Contrôle d'accès
+
+Certaines fonctionnalités administratives sont réservées aux utilisateurs appartenant au groupe Django `Gerant`.
+
+Les interfaces protégées nécessitent une authentification et vérifient les autorisations.
+
+Un utilisateur non autorisé reçoit une réponse HTTP 403.
+
+### 24.6 Journal d'audit
+
+Le modèle `JournalAudit` conserve des informations sur les opérations sensibles.
+
+Il enregistre notamment :
+
+- L'utilisateur responsable.
+- Le type d'opération.
+- L'objet concerné, lorsqu'il est identifié.
+- Une description.
+- La date de l'opération.
+
+Le journal est accessible aux utilisateurs autorisés à l'adresse `/clients/audit/`.
+
+## 25. Tests automatisés
+
+L'application possède une suite de tests Django couvrant les comportements métier, les contrôles d'accès et les mécanismes de traçabilité.
+
+Pour exécuter les tests :
+
+```powershell
+.\.venv\Scripts\python.exe manage.py test cafe_fidelite.loyalty
+```
+
+Le résultat final doit être vérifié avant la remise du projet.
+
+## 26. Documentation complémentaire
+
+Les documents du projet sont organisés dans le répertoire `docs/` :
+
+- `Conception.md` : conception et architecture.
+- `migration.md` : évolution du modèle de données.
+- Document de rétrospective : difficultés, décisions et améliorations.
+- `ADR/` : décisions d'architecture.
+- `AI-USAGE.md` : déclaration de l'utilisation de l'intelligence artificielle, à la racine du projet.
+
+## 27. Exécution locale
+
+Depuis le dossier contenant `manage.py` :
+
+```powershell
+.\.venv\Scripts\python.exe manage.py check
+.\.venv\Scripts\python.exe manage.py migrate
+.\.venv\Scripts\python.exe manage.py runserver
+```
+
+L'application est ensuite accessible sur :
+
+http://127.0.0.1:8000/
+
+L'administration Django est accessible sur :
+
+http://127.0.0.1:8000/admin/
