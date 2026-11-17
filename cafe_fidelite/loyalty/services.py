@@ -6,6 +6,7 @@ from .models import CartePrepayee
 from .services_succursales import (
     obtenir_succursale_active,
     verifier_acces_succursale,
+     verifier_permission_annulation,
 )
 
 from django.db import transaction
@@ -416,6 +417,7 @@ def programmer_regle_fidelite(
 
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.REGLE_FIDELITE,
         objet_id=regle.pk,
         description=(
@@ -439,19 +441,6 @@ def annuler_achat_payant(achat_id, gerant, motif):
     Enregistre un mouvement compensatoire.
     """
 
-    if not gerant.is_authenticated:
-        raise PermissionError(
-            "Connexion requise."
-        )
-
-    if not (
-        gerant.is_superuser
-        or gerant.groups.filter(name="Gerant").exists()
-    ):
-        raise PermissionError(
-            "Seul un gerant peut annuler un achat."
-        )
-
     if not motif or not motif.strip():
         raise ValueError(
             "Le motif est obligatoire."
@@ -461,6 +450,11 @@ def annuler_achat_payant(achat_id, gerant, motif):
         Achat.objects
         .select_for_update()
         .get(pk=achat_id)
+    )
+
+    verifier_permission_annulation(
+    gerant,
+    achat.succursale
     )
 
     if achat.type_achat != Achat.TypeAchat.PAYANT:
@@ -504,6 +498,7 @@ def annuler_achat_payant(achat_id, gerant, motif):
 
     annulation = Annulation.objects.create(
         achat=achat,
+        succursale=achat.succursale,
         gerant=gerant,
         motif=motif.strip(),
     )
@@ -522,6 +517,7 @@ def annuler_achat_payant(achat_id, gerant, motif):
 
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.ANNULATION_ACHAT,
         objet_id=achat.pk,
         description=(
@@ -647,19 +643,6 @@ def annuler_utilisation_recompense(
     et restitue une recompense au client.
     """
 
-    if not gerant.is_authenticated:
-        raise PermissionError(
-            "Connexion requise."
-        )
-
-    if not (
-        gerant.is_superuser
-        or gerant.groups.filter(name="Gerant").exists()
-    ):
-        raise PermissionError(
-            "Seul un gerant peut annuler une transaction."
-        )
-
     if not motif or not motif.strip():
         raise ValueError(
             "Le motif d'annulation est obligatoire."
@@ -669,6 +652,11 @@ def annuler_utilisation_recompense(
         Achat.objects
         .select_for_update()
         .get(pk=achat_id)
+    )
+
+    verifier_permission_annulation(
+    gerant,
+    achat.succursale
     )
 
     if (
@@ -701,6 +689,7 @@ def annuler_utilisation_recompense(
 
     annulation = Annulation.objects.create(
         achat=achat,
+        succursale=achat.succursale,
         gerant=gerant,
         motif=motif.strip(),
     )
@@ -720,6 +709,7 @@ def annuler_utilisation_recompense(
 
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.ANNULATION_RECOMPENSE,
         objet_id=achat.pk,
         description=(
@@ -743,19 +733,6 @@ def annuler_utilisation_carte(
     et restitue un credit.
     """
 
-    if not gerant.is_authenticated:
-        raise PermissionError(
-            "Connexion requise."
-        )
-
-    if not (
-        gerant.is_superuser
-        or gerant.groups.filter(name="Gerant").exists()
-    ):
-        raise PermissionError(
-            "Seul un gerant peut annuler une transaction."
-        )
-
     if not motif or not motif.strip():
         raise ValueError(
             "Le motif est obligatoire."
@@ -765,6 +742,10 @@ def annuler_utilisation_carte(
         Achat.objects
         .select_for_update()
         .get(pk=achat_id)
+    )
+    verifier_permission_annulation(
+    gerant,
+    achat.succursale
     )
 
     if achat.type_achat != Achat.TypeAchat.PREPAYE:
@@ -810,6 +791,7 @@ def annuler_utilisation_carte(
         # Enregistrer l'annulation
     annulation = Annulation.objects.create(
         achat=achat,
+        succursale=achat.succursale,
         gerant=gerant,
         motif=motif.strip(),
     )
@@ -817,6 +799,7 @@ def annuler_utilisation_carte(
     # Conserver une trace dans le journal d'audit
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.ANNULATION_CARTE,
         objet_id=achat.pk,
         description=(
@@ -842,19 +825,6 @@ def annuler_vente_carte(
     uniquement si aucun cafe n'a ete consomme.
     """
 
-    if not gerant.is_authenticated:
-        raise PermissionError(
-            "Connexion requise."
-        )
-
-    if not (
-        gerant.is_superuser
-        or gerant.groups.filter(name="Gerant").exists()
-    ):
-        raise PermissionError(
-            "Seul un gerant peut annuler une vente."
-        )
-
     if not motif or not motif.strip():
         raise ValueError(
             "Le motif est obligatoire."
@@ -864,6 +834,11 @@ def annuler_vente_carte(
         EmissionCarte.objects
         .select_for_update()
         .get(pk=emission_id)
+    )
+
+    verifier_permission_annulation(
+    gerant,
+    emission.succursale
     )
 
     if emission.annulee:
@@ -921,6 +896,7 @@ def annuler_vente_carte(
 
     annulation = Annulation.objects.create(
         emission_carte=emission,
+        succursale=emission.succursale,
         gerant=gerant,
         motif=motif.strip(),
     )
@@ -928,6 +904,7 @@ def annuler_vente_carte(
         # Enregistrer une seule trace de l'annulation
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.ANNULATION_CARTE,
         objet_id=emission.pk,
         description=(
@@ -1169,6 +1146,7 @@ def fusionner_clients(
 
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.FUSION,
         objet_id=fusion.pk,
         description=(
@@ -1244,6 +1222,7 @@ def anonymiser_client(client_id, gerant):
 
     JournalAudit.objects.create(
         utilisateur=gerant,
+        succursale=annulation.succursale,
         action=JournalAudit.TypeAction.ANONYMISATION,
         objet_id=client.pk,
         description=(
