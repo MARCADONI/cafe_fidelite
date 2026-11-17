@@ -145,7 +145,11 @@ def enregistrer_achat_payant(
 
 
 @transaction.atomic
-def utiliser_recompense(client, employe=None):
+def utiliser_recompense( 
+    client,
+    employe=None,
+    succursale=None
+    ):
     """
     Utilise une recompense pour offrir
     un cafe gratuit au client.
@@ -153,6 +157,17 @@ def utiliser_recompense(client, employe=None):
     Conserve l'achat et le mouvement
     dans l'historique.
     """
+        # Determiner et verifier la succursale
+
+    if succursale is None:
+        succursale = obtenir_succursale_active(
+            employe
+        )
+    else:
+        succursale = verifier_acces_succursale(
+            employe,
+            succursale
+        )
     client = Client.objects.select_for_update().get(
         pk=client.pk
     )
@@ -185,6 +200,7 @@ def utiliser_recompense(client, employe=None):
 
     achat = Achat.objects.create(
         client=client,
+        succursale=succursale,
         type_achat=Achat.TypeAchat.GRATUIT_FIDELITE,
         employe=employe,
         effets_traces=True,
