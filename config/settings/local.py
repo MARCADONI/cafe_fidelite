@@ -66,3 +66,6 @@ INSTALLED_APPS += ["django_extensions"]
 
 # Your stuff...
 # ------------------------------------------------------------------------------
+
+# Configuration locale pour les comptes de démonstration
+ACCOUNT_EMAIL_VERIFICATION = "none"
