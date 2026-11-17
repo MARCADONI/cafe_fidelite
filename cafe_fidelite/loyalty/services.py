@@ -221,15 +221,29 @@ def utiliser_recompense(
 
 
 @transaction.atomic
-def emettre_carte_prepayee(client, employe=None):
+def emettre_carte_prepayee( 
+    client,
+    employe=None,
+    succursale=None
+    ):
     """
     Emet une carte prepayee de 11 cafes
     et conserve la transaction de vente.
     """
+    
+    if succursale is None:
+        succursale = obtenir_succursale_active(
+            employe
+        )
+    else:
+        succursale = verifier_acces_succursale(
+            employe,
+            succursale
+        )
 
     client = Client.objects.select_for_update().get(
     pk=client.pk
-)
+    )
 
     verifier_client_actif(client)
 
@@ -253,6 +267,7 @@ def emettre_carte_prepayee(client, employe=None):
 
     EmissionCarte.objects.create(
         carte=carte,
+        succursale=succursale,
         employe=employe,
         date_emission=carte.date_emission,
         annulee=False,
@@ -262,23 +277,39 @@ def emettre_carte_prepayee(client, employe=None):
 
 
 @transaction.atomic
-def utiliser_carte_prepayee(carte, employe=None):
+@transaction.atomic
+def utiliser_carte_prepayee(
+    carte,
+    employe=None,
+    succursale=None
+):
     """
-    Consomme un cafe sur une carte prepayee.
+    Consomme un cafe sur une carte prepayee
+    dans une succursale autorisee.
     """
-    client = Client.objects.select_for_update().get(
-    pk=carte.client_id
-    )
 
-    verifier_client_actif(client)
+    # Verifier la succursale
 
-    if employe is not None and not employe.is_authenticated:
-        raise ValueError(
-            "Employe non authentifie."
+    if succursale is None:
+        succursale = obtenir_succursale_active(
+            employe
+        )
+    else:
+        succursale = verifier_acces_succursale(
+            employe,
+            succursale
         )
 
-    # Une mise a jour conditionnelle empeche
-    # de consommer une carte invalide ou vide.
+    # Verrouiller la carte
+
+    carte = CartePrepayee.objects.select_for_update().get(
+        pk=carte.pk
+    )
+
+    verifier_client_actif(carte.client)
+
+    # Decrementer le solde
+
     lignes_modifiees = (
         CartePrepayee.objects
         .filter(
@@ -300,8 +331,11 @@ def utiliser_carte_prepayee(carte, employe=None):
             "Carte inactive, invalide ou sans credit."
         )
 
+    # Enregistrer la consommation
+
     achat = Achat.objects.create(
         client=carte.client,
+        succursale=succursale,
         type_achat=Achat.TypeAchat.PREPAYE,
         carte_prepayee=carte,
         employe=employe,
@@ -309,8 +343,6 @@ def utiliser_carte_prepayee(carte, employe=None):
     )
 
     return achat
-
-
 
 def obtenir_regle_fidelite(date_operation=None):
     """
