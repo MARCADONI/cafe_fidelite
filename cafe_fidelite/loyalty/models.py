@@ -38,6 +38,49 @@ class Succursale(models.Model):
     def __str__(self):
         return f"{self.nom} ({self.code})"
 
+class AffectationSuccursale(models.Model):
+    """
+    Association entre un employe et une succursale.
+    """
+
+    employe = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="affectations_succursales"
+    )
+
+    succursale = models.ForeignKey(
+        Succursale,
+        on_delete=models.PROTECT,
+        related_name="affectations_employes"
+    )
+
+    active = models.BooleanField(
+        default=True
+    )
+
+    date_affectation = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employe", "succursale"],
+                name="affectation_employe_succursale_unique"
+            )
+        ]
+
+        verbose_name = "Affectation succursale"
+        verbose_name_plural = "Affectations succursales"
+
+    def __str__(self):
+        return (
+            f"{self.employe.username} - "
+            f"{self.succursale.nom}"
+        )
+
+
 class Client(models.Model):
     nom = models.CharField(
         max_length=150,
