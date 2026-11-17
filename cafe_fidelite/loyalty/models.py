@@ -2,6 +2,42 @@ from django.db import models
 from django.conf import settings
 from django.core.validators import MinValueValidator
 
+class Succursale(models.Model):
+    """
+    Represente une succursale du reseau Cafe Fidelite.
+    """
+
+    nom = models.CharField(
+        max_length=150
+    )
+
+    code = models.CharField(
+        max_length=20,
+        unique=True
+    )
+
+    adresse = models.CharField(
+        max_length=255,
+        blank=True,
+        default=""
+    )
+
+    active = models.BooleanField(
+        default=True
+    )
+
+    date_creation = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    class Meta:
+        ordering = ["nom"]
+        verbose_name = "Succursale"
+        verbose_name_plural = "Succursales"
+
+    def __str__(self):
+        return f"{self.nom} ({self.code})"
+
 class Client(models.Model):
     nom = models.CharField(
         max_length=150,
