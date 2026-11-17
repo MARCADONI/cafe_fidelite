@@ -1,6 +1,6 @@
 # ADR-0006 — Fusion de deux fiches clients
 
-- **Statut :** Accepté
+- **Statut :** Remplacé par ADR-0011.
 - **Date :** 2026-10-18
 - **Demande concernée :** Section 3.5 — Fusionner deux fiches
 

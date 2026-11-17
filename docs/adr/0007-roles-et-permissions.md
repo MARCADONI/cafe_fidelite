@@ -1,6 +1,6 @@
 # ADR-0007 — Gestion des employés et des permissions
 
-- **Statut :** Accepté
+- **Statut :** Remplacé par ADR-0010.
 - **Date :** 2026-10-18
 - **Demande concernée :** Section 3.6 — Des employés et des permissions
 

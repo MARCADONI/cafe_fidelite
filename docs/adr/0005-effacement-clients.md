@@ -1,6 +1,6 @@
 # ADR-0005 — Effacement des renseignements personnels d'un client
 
-- **Statut :** Accepté
+- **Statut :** Remplacé par ADR-0011.
 - **Date :** 2026-10-18
 - **Demande concernée :** Section 3.4 — Effacer un client
 
