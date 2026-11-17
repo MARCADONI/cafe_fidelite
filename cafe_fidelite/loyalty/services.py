@@ -3,6 +3,11 @@ from .models import Client
 from .models import Fidelite
 from .models import CartePrepayee
 
+from .services_succursales import (
+    obtenir_succursale_active,
+    verifier_acces_succursale,
+)
+
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
@@ -18,11 +23,27 @@ from .models import Achat, Fidelite, RegleFidelite,Annulation,MouvementFidelite,
 
 
 @transaction.atomic
-def enregistrer_achat_payant(client, employe=None):
+def enregistrer_achat_payant(
+    client,
+    employe=None,
+    succursale=None
+    ):
     """
     Enregistre un achat payant et memorise
     ses effets sur les compteurs de fidelite.
     """
+
+        # Determiner et verifier la succursale
+
+    if succursale is None:
+        succursale = obtenir_succursale_active(
+            employe
+        )
+    else:
+        succursale = verifier_acces_succursale(
+            employe,
+            succursale
+        )
     client = Client.objects.select_for_update().get(
         pk=client.pk
     )
@@ -68,6 +89,7 @@ def enregistrer_achat_payant(client, employe=None):
 
     achat = Achat.objects.create(
         client=client,
+        succursale=succursale,
         type_achat=Achat.TypeAchat.PAYANT,
         employe=employe,
         seuil_fidelite_applique=seuil,
