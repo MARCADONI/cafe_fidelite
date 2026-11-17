@@ -18,6 +18,13 @@ from .services import (
     annuler_vente_carte,
 )
 
+from .services_succursales import (
+    est_employe,
+    est_gerant,
+    est_proprietaire,
+    obtenir_succursales_autorisees,
+)
+
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import render,redirect
@@ -38,40 +45,67 @@ from functools import wraps
 
 
 def employe_required(view_func):
+    """
+    Autorise les baristas, les gerants
+    et les proprietaires.
+    """
+
     @login_required
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        est_employe = (
-            request.user.is_superuser
-            or request.user.groups.filter(
-                name__in=["Barista", "Gerant"]
-            ).exists()
-        )
 
-        if not est_employe:
+        if not est_employe(request.user):
             raise PermissionDenied(
-                "Accès réservé aux employés du café."
+                "Vous ne possedez pas les droits requis."
             )
 
-        return view_func(request, *args, **kwargs)
+        if not obtenir_succursales_autorisees(
+            request.user
+        ).exists():
+            raise PermissionDenied(
+                "Aucune succursale autorisee."
+            )
+
+        return view_func(
+            request,
+            *args,
+            **kwargs
+        )
 
     return wrapper
 
 def gerant_required(view_func):
+    """
+    Autorise les gerants et les proprietaires.
+    """
+
     @login_required
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        est_gerant = (
-            request.user.is_superuser
-            or request.user.groups.filter(name="Gerant").exists()
-        )
 
-        if not est_gerant:
+        if not (
+            est_gerant(request.user)
+            or est_proprietaire(request.user)
+        ):
             raise PermissionDenied(
-                "Cette fonctionnalité est réservée au gérant."
+                "Acces reserve aux gerants "
+                "et aux proprietaires."
             )
 
-        return view_func(request, *args, **kwargs)
+        if not est_proprietaire(request.user):
+
+            if not obtenir_succursales_autorisees(
+                request.user
+            ).exists():
+                raise PermissionDenied(
+                    "Aucune succursale autorisee."
+                )
+
+        return view_func(
+            request,
+            *args,
+            **kwargs
+        )
 
     return wrapper
 
@@ -111,6 +145,29 @@ def client_recherche_creation(request):
         "loyalty/client_recherche_creation.html",
         contexte,
     )
+
+def proprietaire_required(view_func):
+    """
+    Autorise uniquement les proprietaires.
+    """
+
+    @login_required
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+
+        if not est_proprietaire(request.user):
+            raise PermissionDenied(
+                "Acces reserve aux proprietaires."
+            )
+
+        return view_func(
+            request,
+            *args,
+            **kwargs
+        )
+
+    return wrapper
+
 
 @employe_required
 def enregistrer_achat(request, client_id):
@@ -239,7 +296,7 @@ def rapport_statistiques(request):
 
 
 
-@gerant_required
+@proprietaire_required
 def fusion_clients(request):
     """
     Interface de fusion reservee au gerant.
@@ -298,7 +355,7 @@ def fusion_clients(request):
 
 
 
-@gerant_required
+@proprietaire_required
 def anonymisation_client(request):
     """
     Interface d'anonymisation reservee au gerant.
