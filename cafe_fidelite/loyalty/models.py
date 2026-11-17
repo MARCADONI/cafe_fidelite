@@ -197,6 +197,13 @@ class Achat(models.Model):
         on_delete=models.CASCADE,
         related_name="achats",
     )
+    succursale = models.ForeignKey(
+    Succursale,
+    on_delete=models.PROTECT,
+    null=True,
+    blank=True,
+    related_name="achats"
+    )
     type_achat = models.CharField(
         max_length=20,
         choices=TypeAchat.choices,
@@ -286,6 +293,14 @@ class EmissionCarte(models.Model):
         related_name="emission"
     )
 
+    succursale = models.ForeignKey(
+    Succursale,
+    on_delete=models.PROTECT,
+    null=True,
+    blank=True,
+    related_name="emissions_cartes"
+    )
+
     employe = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -321,6 +336,14 @@ class Annulation(models.Model):
         null=True,
         blank=True,
         related_name="annulation"
+    )
+
+    succursale = models.ForeignKey(
+    Succursale,
+    on_delete=models.PROTECT,
+    null=True,
+    blank=True,
+    related_name="annulations"
     )
 
     gerant = models.ForeignKey(
@@ -489,6 +512,14 @@ class JournalAudit(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
+    )
+
+    succursale = models.ForeignKey(
+    Succursale,
+    on_delete=models.PROTECT,
+    null=True,
+    blank=True,
+    related_name="journaux_audit"
     )
 
     action = models.CharField(
