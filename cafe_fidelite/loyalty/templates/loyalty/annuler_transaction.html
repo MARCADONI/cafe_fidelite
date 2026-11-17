@@ -1,0 +1,376 @@
+
+{% extends "base.html" %}
+
+{% block title %}
+Annuler une transaction
+{% endblock title %}
+
+{% block content %}
+
+<div class="container py-5">
+
+    <!-- TITRE -->
+    <div class="text-center mb-4">
+        <h1 class="h3">Gestion des annulations</h1>
+        <p class="text-muted">
+            Interface reservee aux gerants du cafe.
+        </p>
+    </div>
+
+    <!-- FORMULAIRE D'ANNULATION -->
+    <div class="row justify-content-center mb-5">
+        <div class="col-lg-8">
+
+            <div class="card shadow-sm">
+
+                <div class="card-header bg-danger text-white">
+                    <h2 class="h5 mb-0">
+                        Annuler une transaction
+                    </h2>
+                </div>
+
+                <div class="card-body">
+
+                    <!-- MESSAGES -->
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="alert alert-{{ message.tags|default:'info' }}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    <!-- FORMULAIRE -->
+                    <form method="post" id="form-annulation">
+
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger">
+                                {{ form.non_field_errors }}
+                            </div>
+                        {% endif %}
+
+                        <!-- TYPE -->
+                        <div class="mb-3">
+                            <label
+                                for="id_type_transaction"
+                                class="form-label"
+                            >
+                                Type de transaction
+                            </label>
+
+                            {{ form.type_transaction }}
+                            {{ form.type_transaction.errors }}
+                        </div>
+
+                        <!-- IDENTIFIANT -->
+                        <div class="mb-3">
+                            <label
+                                for="id_transaction_id"
+                                class="form-label"
+                            >
+                                Identifiant de la transaction
+                            </label>
+
+                            {{ form.transaction_id }}
+                            {{ form.transaction_id.errors }}
+                        </div>
+
+                        <!-- MOTIF -->
+                        <div class="mb-3">
+                            <label
+                                for="id_motif"
+                                class="form-label"
+                            >
+                                Motif de l'annulation
+                            </label>
+
+                            {{ form.motif }}
+                            {{ form.motif.errors }}
+                        </div>
+
+                        <!-- AVERTISSEMENT -->
+                        <div class="alert alert-warning">
+                            <strong>Attention :</strong>
+                            cette operation modifiera les soldes
+                            du client. Verifiez les informations
+                            avant de confirmer.
+                        </div>
+
+                        <!-- BOUTONS -->
+                        <div class="d-grid gap-2">
+
+                            <button
+                                type="submit"
+                                class="btn btn-danger"
+                            >
+                                Confirmer l'annulation
+                            </button>
+
+                            <a
+                                href="{% url 'loyalty:client_recherche_creation' %}"
+                                class="btn btn-outline-secondary"
+                            >
+                                Retour aux clients
+                            </a>
+
+                        </div>
+
+                    </form>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLEAU DES ACHATS -->
+    <div class="card shadow-sm mb-4">
+
+        <div class="card-header">
+            <h2 class="h5 mb-0">
+                Derniers achats enregistres
+            </h2>
+        </div>
+
+        <div class="card-body">
+
+            <div class="table-responsive">
+
+                <table class="table table-striped table-hover">
+
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Client</th>
+                            <th>Type</th>
+                            <th>Employe</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for achat in achats_recents %}
+
+                        <tr>
+                            <td>{{ achat.pk }}</td>
+
+                            <td>{{ achat.client.nom }}</td>
+
+                            <td>
+                                {{ achat.get_type_achat_display }}
+                            </td>
+
+                            <td>
+                                {{ achat.employe|default:"Non renseigne" }}
+                            </td>
+
+                            <td>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger"
+                                    data-type="{{ achat.type_achat }}"
+                                    data-id="{{ achat.pk }}"
+                                    onclick="selectionnerTransaction(this)"
+                                >
+                                    Selectionner
+                                </button>
+                            </td>
+                        </tr>
+
+                        {% empty %}
+
+                        <tr>
+                            <td colspan="5" class="text-center">
+                                Aucun achat enregistre.
+                            </td>
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+    </div>
+
+    <!-- TABLEAU DES VENTES DE CARTES -->
+    <div class="card shadow-sm mb-4">
+
+        <div class="card-header">
+            <h2 class="h5 mb-0">
+                Dernieres ventes de cartes prepayees
+            </h2>
+        </div>
+
+        <div class="card-body">
+
+            <div class="table-responsive">
+
+                <table class="table table-striped table-hover">
+
+                    <thead>
+                        <tr>
+                            <th>ID emission</th>
+                            <th>Client</th>
+                            <th>Carte</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+
+                    <tbody>
+
+                        {% for emission in ventes_cartes %}
+
+                        <tr>
+                            <td>{{ emission.pk }}</td>
+
+                            <td>
+                                {{ emission.carte.client.nom }}
+                            </td>
+
+                            <td>
+                                {{ emission.carte.pk }}
+                            </td>
+
+                            <td>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger"
+                                    data-type="vente_carte"
+                                    data-id="{{ emission.pk }}"
+                                    onclick="selectionnerTransaction(this)"
+                                >
+                                    Selectionner
+                                </button>
+                            </td>
+                        </tr>
+
+                        {% empty %}
+
+                        <tr>
+                            <td colspan="4" class="text-center">
+                                Aucune vente de carte enregistree.
+                            </td>
+                        </tr>
+
+                        {% endfor %}
+
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </div>
+    </div>
+
+</div>
+
+<!-- JAVASCRIPT -->
+<script>
+
+function selectionnerTransaction(bouton) {
+
+    const type = bouton.dataset.type;
+    const identifiant = bouton.dataset.id;
+
+    const champType = document.getElementById(
+        "id_type_transaction"
+    );
+
+    const champId = document.getElementById(
+        "id_transaction_id"
+    );
+
+    const champMotif = document.getElementById(
+        "id_motif"
+    );
+
+    if (!champType || !champId) {
+        alert("Formulaire d'annulation introuvable.");
+        return;
+    }
+
+    // Correspondance avec les choix du formulaire
+    const typesConnus = {
+        "payant": "payant",
+        "gratuit": "gratuit",
+        "prepaye": "prepaye",
+        "vente_carte": "vente_carte"
+    };
+
+    const typeFormulaire = typesConnus[type];
+
+    if (!typeFormulaire) {
+        alert(
+            "Type de transaction non reconnu : " + type
+        );
+        return;
+    }
+
+    // Remplir automatiquement le formulaire
+    champType.value = typeFormulaire;
+    champId.value = identifiant;
+
+    // Remonter au formulaire
+    document.getElementById(
+        "form-annulation"
+    ).scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+    });
+
+    // Positionner le curseur dans le motif
+    if (champMotif) {
+        champMotif.focus({
+            preventScroll: true
+        });
+    }
+}
+
+
+// CONFIRMATION AVANT ANNULATION
+document.getElementById(
+    "form-annulation"
+).addEventListener("submit", function(event) {
+
+    const type = document.getElementById(
+        "id_type_transaction"
+    ).value;
+
+    const identifiant = document.getElementById(
+        "id_transaction_id"
+    ).value;
+
+    const motif = document.getElementById(
+        "id_motif"
+    ).value.trim();
+
+    if (!motif) {
+        event.preventDefault();
+        alert("Veuillez indiquer un motif d'annulation.");
+        return;
+    }
+
+    const confirmation = confirm(
+        "Confirmer l'annulation ?\n\n" +
+        "Type : " + type + "\n" +
+        "Transaction : " + identifiant + "\n" +
+        "Motif : " + motif + "\n\n" +
+        "Cette operation modifiera les soldes du client."
+    );
+
+    if (!confirmation) {
+        event.preventDefault();
+    }
+
+});
+
+</script>
+
+{% endblock content %}

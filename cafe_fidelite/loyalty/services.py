@@ -317,7 +317,7 @@ def programmer_regle_fidelite(
         )
 
     if not gerant.groups.filter(
-        name="gerant"
+        name="Gerant"
     ).exists():
         raise PermissionError(
             "Seul un gerant peut modifier les regles."
@@ -376,7 +376,7 @@ def annuler_achat_payant(achat_id, gerant, motif):
 
     if not (
         gerant.is_superuser
-        or gerant.groups.filter(name="gerant").exists()
+        or gerant.groups.filter(name="Gerant").exists()
     ):
         raise PermissionError(
             "Seul un gerant peut annuler un achat."
@@ -494,58 +494,60 @@ def retirer_etampes_avec_dette(fidelite, quantite):
 
 
 
+
+
 def appliquer_correction_achat_simple(fidelite, achat):
     """
     Annule les effets d'un achat payant v2.
 
-    Si la recompense generee est encore
-    disponible, elle est reconvertie en etampes.
+    Si une recompense generee est disponible,
+    elle est reconvertie en etampes.
 
-    Si elle n'est plus disponible, l'operation
-    est refusee pour reconciliation ulterieure.
+    Si elle a deja ete consommee, on conserve
+    la consommation et on cree uniquement la
+    dette correspondant a l'achat annule.
     """
 
     variation_etampes = 0
     variation_dette = 0
 
+    # 1. Traiter les recompenses generees
     if achat.recompenses_generees > 0:
-        if (
-            fidelite.recompenses
-            < achat.recompenses_generees
-        ):
-            raise ValueError(
-                "Recompense deja consommee : "
-                "reconciliation necessaire."
-            )
 
         seuil = achat.seuil_fidelite_applique
 
-        if not seuil:
+        if not seuil or seuil < 1:
             raise ValueError(
-                "Seuil de fidelite introuvable."
+                "Seuil de fidelite invalide."
             )
 
-        fidelite.recompenses -= (
-            achat.recompenses_generees
+        disponibles = min(
+            fidelite.recompenses,
+            achat.recompenses_generees,
         )
 
-        etampes_restituees = (
-            achat.recompenses_generees * seuil
-        )
+        # Seules les recompenses encore disponibles
+        # peuvent etre reconverties en etampes.
+        fidelite.recompenses -= disponibles
+
+        etampes_restituees = disponibles * seuil
 
         fidelite.progression += etampes_restituees
         variation_etampes += etampes_restituees
 
-    if achat.dette_remboursee:
-        fidelite.dette_etampes += (
-            achat.dette_remboursee
-        )
+        # Les recompenses deja consommees ne sont
+        # pas reconverties : elles restent dans
+        # l'historique des consommations.
 
-        variation_dette += (
-            achat.dette_remboursee
-        )
+    # 2. Annuler un remboursement de dette
+    if achat.dette_remboursee > 0:
 
-    if achat.etampes_ajoutees:
+        fidelite.dette_etampes += achat.dette_remboursee
+        variation_dette += achat.dette_remboursee
+
+    # 3. Retirer l'etampage de l'achat annule
+    if achat.etampes_ajoutees > 0:
+
         disponibles = min(
             fidelite.progression,
             achat.etampes_ajoutees,
@@ -554,11 +556,9 @@ def appliquer_correction_achat_simple(fidelite, achat):
         fidelite.progression -= disponibles
         variation_etampes -= disponibles
 
-        manque = (
-            achat.etampes_ajoutees - disponibles
-        )
+        manque = achat.etampes_ajoutees - disponibles
 
-        if manque:
+        if manque > 0:
             fidelite.dette_etampes += manque
             variation_dette += manque
 
@@ -584,7 +584,7 @@ def annuler_utilisation_recompense(
 
     if not (
         gerant.is_superuser
-        or gerant.groups.filter(name="gerant").exists()
+        or gerant.groups.filter(name="Gerant").exists()
     ):
         raise PermissionError(
             "Seul un gerant peut annuler une transaction."
@@ -680,7 +680,7 @@ def annuler_utilisation_carte(
 
     if not (
         gerant.is_superuser
-        or gerant.groups.filter(name="gerant").exists()
+        or gerant.groups.filter(name="Gerant").exists()
     ):
         raise PermissionError(
             "Seul un gerant peut annuler une transaction."
@@ -735,11 +735,28 @@ def annuler_utilisation_carte(
         ]
     )
 
+   
+
+        # Enregistrer l'annulation
     annulation = Annulation.objects.create(
         achat=achat,
         gerant=gerant,
         motif=motif.strip(),
     )
+
+    # Conserver une trace dans le journal d'audit
+    JournalAudit.objects.create(
+        utilisateur=gerant,
+        action=JournalAudit.TypeAction.ANNULATION_CARTE,
+        objet_id=achat.pk,
+        description=(
+            f"Annulation de la consommation prépayée "
+            f"#{achat.pk}, carte #{carte.pk}. "
+            f"Motif : {motif.strip()}"
+        ),
+    )
+
+
 
     return annulation
 
@@ -762,7 +779,7 @@ def annuler_vente_carte(
 
     if not (
         gerant.is_superuser
-        or gerant.groups.filter(name="gerant").exists()
+        or gerant.groups.filter(name="Gerant").exists()
     ):
         raise PermissionError(
             "Seul un gerant peut annuler une vente."
@@ -838,23 +855,15 @@ def annuler_vente_carte(
         motif=motif.strip(),
     )
 
+        # Enregistrer une seule trace de l'annulation
     JournalAudit.objects.create(
         utilisateur=gerant,
         action=JournalAudit.TypeAction.ANNULATION_CARTE,
         objet_id=emission.pk,
         description=(
-            f"Annulation d'une consommation "
-            f"prepayee : achat #{carte.pk}."
-        ),
-    )
-
-    JournalAudit.objects.create(
-        utilisateur=gerant,
-        action=JournalAudit.TypeAction.ANNULATION_CARTE,
-        objet_id=emission.pk,
-        description=(
-            f"Annulation de la vente "
-            f"de carte #{carte.pk}."
+            f"Annulation de la vente de la carte #{carte.pk}. "
+            f"Émission #{emission.pk}. "
+            f"Motif : {motif.strip()}"
         ),
     )
 

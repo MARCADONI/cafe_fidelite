@@ -35,4 +35,10 @@ urlpatterns = [
     views.journal_audit,
     name="journal_audit",
 ),
+
+path(
+    "annulations/",
+    views.annuler_transaction,
+    name="annuler_transaction",
+),
 ]

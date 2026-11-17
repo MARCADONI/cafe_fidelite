@@ -53,7 +53,6 @@ from cafe_fidelite.loyalty.services import (
     annuler_vente_carte,
     fusionner_clients,
     anonymiser_client,
-    enregistrer_achat_payant,
     verifier_client_actif,
 )
 
@@ -115,7 +114,7 @@ class AnnulationAchatPayantTests(TestCase):
         User = get_user_model()
 
         groupe_gerant, _ = Group.objects.get_or_create(
-            name="gerant"
+            name="Gerant"
         )
 
         self.gerant = User.objects.create_user(
@@ -326,7 +325,7 @@ class UtilisationRecompenseTests(TestCase):
         User = get_user_model()
 
         groupe_gerant, _ = Group.objects.get_or_create(
-            name="gerant"
+            name="Gerant"
         )
 
         self.gerant = User.objects.create_user(
@@ -456,7 +455,7 @@ class CartePrepayeeTests(TestCase):
         User = get_user_model()
 
         groupe_gerant, _ = Group.objects.get_or_create(
-            name="gerant"
+            name="Gerant"
         )
 
         self.gerant = User.objects.create_user(
@@ -584,7 +583,7 @@ class RapportStatistiquesTests(TestCase):
         User = get_user_model()
 
         groupe, _ = Group.objects.get_or_create(
-            name="gerant"
+            name="Gerant"
         )
 
         self.gerant = User.objects.create_user(
@@ -1825,3 +1824,236 @@ class JournalAuditInterfaceTests(TestCase):
 
         self.assertEqual(journaux[0].pk, recent.pk)
         self.assertEqual(journaux[1].pk, ancien.pk)
+
+
+
+class PermissionsEmployesTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.barista = User.objects.create_user(
+            username="barista_test",
+            password="Test12345!"
+        )
+
+        self.gerant = User.objects.create_user(
+            username="gerant_test",
+            password="Test12345!"
+        )
+
+        groupe_barista, _ = Group.objects.get_or_create(
+            name="Barista"
+        )
+
+        groupe_gerant, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+
+        self.barista.groups.add(groupe_barista)
+        self.gerant.groups.add(groupe_gerant)
+
+    def test_barista_ne_peut_pas_acceder_aux_rapports(self):
+        self.client.force_login(self.barista)
+
+        response = self.client.get(
+            reverse("loyalty:rapport_statistiques")
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_gerant_peut_acceder_aux_rapports(self):
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(
+            reverse("loyalty:rapport_statistiques")
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+
+        # ==========================================
+    # TESTS DES PERMISSIONS : FUSION DES CLIENTS
+    # ==========================================
+
+    def test_barista_ne_peut_pas_fusionner_clients(self):
+        self.client.force_login(self.barista)
+
+        response = self.client.get(
+            reverse("loyalty:fusion_clients")
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_gerant_peut_acceder_fusion_clients(self):
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(
+            reverse("loyalty:fusion_clients")
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    # ==========================================
+    # TESTS DES PERMISSIONS : ANONYMISATION
+    # ==========================================
+
+    def test_barista_ne_peut_pas_anonymiser_client(self):
+        self.client.force_login(self.barista)
+
+        response = self.client.get(
+            reverse("loyalty:anonymisation_client")
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_gerant_peut_acceder_anonymisation(self):
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(
+            reverse("loyalty:anonymisation_client")
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    # ==========================================
+    # TESTS DES PERMISSIONS : JOURNAL D'AUDIT
+    # ==========================================
+
+    def test_barista_ne_peut_pas_consulter_audit(self):
+        self.client.force_login(self.barista)
+
+        response = self.client.get(
+            reverse("loyalty:journal_audit")
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_gerant_peut_consulter_audit(self):
+        self.client.force_login(self.gerant)
+
+        response = self.client.get(
+            reverse("loyalty:journal_audit")
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+
+
+
+class AnnulationAchatTests(TestCase):
+
+    def setUp(self):
+        User = get_user_model()
+
+        self.gerant = User.objects.create_user(
+            username="gerant_annulation",
+            password="Test12345!",
+        )
+
+        groupe, _ = Group.objects.get_or_create(
+            name="Gerant"
+        )
+        self.gerant.groups.add(groupe)
+
+        self.client_cafe = Client.objects.create(
+            nom="Client Test Annulation",
+        )
+
+        RegleFidelite.objects.create(
+            seuil=10,
+            date_entree_vigueur=(
+                timezone.now() - timedelta(days=1)
+            ),
+            cree_par=self.gerant,
+        )
+
+    def test_annulation_recompense_disponible(self):
+        # Enregistrer 10 achats payants
+        achats = [
+            enregistrer_achat_payant(
+                self.client_cafe,
+                employe=self.gerant,
+            )
+            for _ in range(10)
+        ]
+
+        fidelite = Fidelite.objects.get(
+            client=self.client_cafe
+        )
+
+        self.assertEqual(fidelite.recompenses, 1)
+
+        # Annuler le 10e achat
+        annulation = annuler_achat_payant(
+            achat_id=achats[-1].pk,
+            gerant=self.gerant,
+            motif="Achat attribue au mauvais client",
+        )
+
+        fidelite.refresh_from_db()
+
+        self.assertEqual(fidelite.progression, 9)
+        self.assertEqual(fidelite.recompenses, 0)
+        self.assertEqual(fidelite.dette_etampes, 0)
+
+        self.assertEqual(
+            annulation.gerant,
+            self.gerant,
+        )
+
+        self.assertTrue(
+            Annulation.objects.filter(
+                achat=achats[-1]
+            ).exists()
+        )
+
+    def test_annulation_recompense_deja_consommee(self):
+        # Enregistrer 10 achats
+        achats = [
+            enregistrer_achat_payant(
+                self.client_cafe,
+                employe=self.gerant,
+            )
+            for _ in range(10)
+        ]
+
+        # Consommer le cafe gratuit
+        utiliser_recompense(
+            self.client_cafe,
+            employe=self.gerant,
+        )
+
+        # Annuler le 10e achat
+        annuler_achat_payant(
+            achat_id=achats[-1].pk,
+            gerant=self.gerant,
+            motif="Erreur de client",
+        )
+
+        fidelite = Fidelite.objects.get(
+            client=self.client_cafe
+        )
+
+        self.assertEqual(fidelite.progression, 0)
+        self.assertEqual(fidelite.recompenses, 0)
+        self.assertEqual(fidelite.dette_etampes, 1)
+
+    def test_impossible_annuler_deux_fois(self):
+        achat = enregistrer_achat_payant(
+            self.client_cafe,
+            employe=self.gerant,
+        )
+
+        annuler_achat_payant(
+            achat_id=achat.pk,
+            gerant=self.gerant,
+            motif="Premiere annulation",
+        )
+
+        with self.assertRaises(ValueError):
+            annuler_achat_payant(
+                achat_id=achat.pk,
+                gerant=self.gerant,
+                motif="Deuxieme annulation",
+            )

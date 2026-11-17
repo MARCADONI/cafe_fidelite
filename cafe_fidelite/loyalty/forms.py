@@ -137,3 +137,37 @@ class AnonymisationClientForm(forms.Form):
             )
             .order_by("nom", "pk")
         )
+
+
+class AnnulationTransactionForm(forms.Form):
+
+    TYPES_TRANSACTION = [
+        ("payant", "Achat payant"),
+        ("gratuit", "Cafe gratuit"),
+        ("prepaye", "Cafe prepaye"),
+        ("vente_carte", "Vente d'une carte prepayee"),
+    ]
+
+    type_transaction = forms.ChoiceField(
+        choices=TYPES_TRANSACTION,
+        label="Type de transaction",
+    )
+
+    transaction_id = forms.IntegerField(
+        min_value=1,
+        label="Identifiant de la transaction",
+    )
+
+    motif = forms.CharField(
+        max_length=500,
+        widget=forms.Textarea(
+            attrs={
+                "rows": 3,
+                "placeholder": (
+                    "Expliquez pourquoi la transaction "
+                    "doit etre annulee."
+                ),
+            }
+        ),
+        label="Motif de l'annulation",
+    )

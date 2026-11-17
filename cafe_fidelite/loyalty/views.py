@@ -2,14 +2,20 @@ from django.contrib import messages
 from django.shortcuts import get_object_or_404
 from django.shortcuts import redirect
 from django.shortcuts import render
+from django.http import Http404
 
 from .forms import ClientForm
-from .models import CartePrepayee, Client, Fidelite,JournalAudit
+from .forms import AnnulationTransactionForm
+from .models import CartePrepayee, Client, Fidelite,JournalAudit,Achat, EmissionCarte
 from .services import (
     emettre_carte_prepayee,
     enregistrer_achat_payant,
     utiliser_carte_prepayee,
     utiliser_recompense,
+    annuler_achat_payant,
+    annuler_utilisation_recompense,
+    annuler_utilisation_carte,
+    annuler_vente_carte,
 )
 
 from django.contrib.auth.decorators import login_required
@@ -28,6 +34,48 @@ from cafe_fidelite.loyalty.services import fusionner_clients
 from cafe_fidelite.loyalty.forms import AnonymisationClientForm
 from cafe_fidelite.loyalty.services import anonymiser_client
 
+from functools import wraps
+
+
+def employe_required(view_func):
+    @login_required
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        est_employe = (
+            request.user.is_superuser
+            or request.user.groups.filter(
+                name__in=["Barista", "Gerant"]
+            ).exists()
+        )
+
+        if not est_employe:
+            raise PermissionDenied(
+                "Accès réservé aux employés du café."
+            )
+
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+def gerant_required(view_func):
+    @login_required
+    @wraps(view_func)
+    def wrapper(request, *args, **kwargs):
+        est_gerant = (
+            request.user.is_superuser
+            or request.user.groups.filter(name="Gerant").exists()
+        )
+
+        if not est_gerant:
+            raise PermissionDenied(
+                "Cette fonctionnalité est réservée au gérant."
+            )
+
+        return view_func(request, *args, **kwargs)
+
+    return wrapper
+
+@employe_required
 def client_recherche_creation(request):
     telephone = request.GET.get("telephone", "")
     client = None
@@ -64,6 +112,7 @@ def client_recherche_creation(request):
         contexte,
     )
 
+@employe_required
 def enregistrer_achat(request, client_id):
     client = get_object_or_404(Client, id=client_id)
     fidelite, _ = Fidelite.objects.get_or_create(client=client)
@@ -72,7 +121,10 @@ def enregistrer_achat(request, client_id):
         action = request.POST.get("action")
 
         if action == "achat_payant":
-            fidelite = enregistrer_achat_payant(client)
+            
+
+            achat = enregistrer_achat_payant(client,employe=request.user)
+            fidelite.refresh_from_db()
 
             messages.success(
                 request,
@@ -85,7 +137,7 @@ def enregistrer_achat(request, client_id):
 
         elif action == "utiliser_recompense":
             
-            achat = utiliser_recompense(client)
+            achat = utiliser_recompense(client,employe=request.user)
 
             if achat is not None:
                 messages.success(
@@ -100,7 +152,7 @@ def enregistrer_achat(request, client_id):
                )
 
         elif action == "emettre_carte":
-            carte = emettre_carte_prepayee(client)
+            carte = emettre_carte_prepayee(client,employe=request.user)
 
             messages.success(
                 request,
@@ -118,7 +170,7 @@ def enregistrer_achat(request, client_id):
                 client=client,
             )
 
-            achat = utiliser_carte_prepayee(carte)
+            achat = utiliser_carte_prepayee(carte, employe=request.user)
 
             if achat is not None:
                 messages.success(
@@ -158,25 +210,12 @@ def enregistrer_achat(request, client_id):
 
 
 
-@login_required
+@gerant_required
 def rapport_statistiques(request):
     """
     Affiche les statistiques du cafe.
     Acces reserve au gerant.
     """
-
-    est_gerant = (
-        request.user.is_superuser
-        or request.user.groups.filter(
-            name="gerant"
-        ).exists()
-    )
-
-    if not est_gerant:
-        raise PermissionDenied(
-            "Acces reserve au gerant."
-        )
-
     formulaire = RapportStatistiquesForm(
         request.GET or None
     )
@@ -200,25 +239,11 @@ def rapport_statistiques(request):
 
 
 
-@login_required
+@gerant_required
 def fusion_clients(request):
     """
     Interface de fusion reservee au gerant.
     """
-
-    # 1. Verifier les permissions
-    est_gerant = (
-        request.user.is_superuser
-        or request.user.groups.filter(
-            name="Gerant"
-        ).exists()
-    )
-
-    if not est_gerant:
-        raise PermissionDenied(
-            "Acces reserve au gerant."
-        )
-
     # 2. Traiter le formulaire
     if request.method == "POST":
         form = FusionClientForm(request.POST)
@@ -273,24 +298,12 @@ def fusion_clients(request):
 
 
 
-@login_required
+@gerant_required
 def anonymisation_client(request):
     """
     Interface d'anonymisation reservee au gerant.
     """
 
-    # 1. Verifier les permissions
-    est_gerant = (
-        request.user.is_superuser
-        or request.user.groups.filter(
-            name="Gerant"
-        ).exists()
-    )
-
-    if not est_gerant:
-        raise PermissionDenied(
-            "Acces reserve au gerant."
-        )
 
     # 2. Traiter le formulaire
     if request.method == "POST":
@@ -332,24 +345,17 @@ def anonymisation_client(request):
 
 
 
-@login_required
+@gerant_required
 def journal_audit(request):
     """
     Affiche le journal des operations sensibles.
     Accessible uniquement aux gerants.
     """
 
-    if not request.user.groups.filter(
-        name="Gerant"
-    ).exists():
-        raise PermissionDenied(
-            "Acces reserve au gerant."
-        )
-
     journaux = (
         JournalAudit.objects
         .select_related("utilisateur")
-        .all()[:100]
+        .order_by("-date_action")[:100]
     )
 
     return render(
@@ -358,4 +364,109 @@ def journal_audit(request):
         {
             "journaux": journaux,
         },
+    )
+
+
+
+
+@gerant_required
+def annuler_transaction(request):
+    """
+    Permet au gerant d'annuler une transaction.
+
+    Types acceptes :
+    - Achat payant
+    - Cafe gratuit
+    - Cafe prepaye
+    - Vente de carte prepayee
+    """
+
+    if request.method == "POST":
+        form = AnnulationTransactionForm(request.POST)
+
+        if form.is_valid():
+            type_transaction = form.cleaned_data[
+                "type_transaction"
+            ]
+            transaction_id = form.cleaned_data[
+                "transaction_id"
+            ]
+            motif = form.cleaned_data["motif"]
+
+            try:
+                # Annulation d'un achat payant
+                if type_transaction == "payant":
+                    annuler_achat_payant(
+                        achat_id=transaction_id,
+                        gerant=request.user,
+                        motif=motif,
+                    )
+
+                # Annulation d'un cafe gratuit
+                elif type_transaction == "gratuit":
+                    annuler_utilisation_recompense(
+                        achat_id=transaction_id,
+                        gerant=request.user,
+                        motif=motif,
+                    )
+
+                # Annulation d'un cafe prepaye
+                elif type_transaction == "prepaye":
+                    annuler_utilisation_carte(
+                        achat_id=transaction_id,
+                        gerant=request.user,
+                        motif=motif,
+                    )
+
+                # Annulation d'une vente de carte
+                elif type_transaction == "vente_carte":
+                    annuler_vente_carte(
+                        emission_id=transaction_id,
+                        gerant=request.user,
+                        motif=motif,
+                    )
+
+            except (Achat.DoesNotExist, EmissionCarte.DoesNotExist):
+                form.add_error(
+                    "transaction_id",
+                    "Transaction introuvable.",
+                )
+
+            except (ValueError, PermissionError) as erreur:
+                form.add_error(None, str(erreur))
+
+            else:
+                messages.success(
+                    request,
+                    "Transaction annulee avec succes.",
+                )
+
+                return redirect(
+                    "loyalty:annuler_transaction"
+                )
+
+    else:
+        form = AnnulationTransactionForm()
+
+        # Recuperer les 20 derniers achats
+    achats_recents = (
+        Achat.objects
+        .select_related("client", "employe")
+        .order_by("-pk")[:20]
+    )
+    # Recuperer les 20 dernieres ventes de cartes
+    ventes_cartes = (
+        EmissionCarte.objects
+        .select_related("carte__client")
+        .order_by("-pk")[:20]
+    )
+
+    return render(
+    request,
+    "loyalty/annuler_transaction.html",
+    {
+        "form": form,
+        "achats_recents": achats_recents,
+        "ventes_cartes": ventes_cartes,
+    },
     )
