@@ -1,29 +1,43 @@
-# Rétrospective — Version 2
+# Rétrospective de Café Fidélité — Version 2
 
-## Bilan de la version 2
+## 1. Bilan de la version 2
 
-La version 2 de Café Fidélité a permis d'enrichir l'application initiale en introduisant les annulations de transactions, les rapports statistiques, les règles de fidélité configurables, l'anonymisation, la fusion des clients ainsi que l'authentification et les permissions des employés.
+La version 2 de Café Fidélité a permis d'enrichir considérablement les fonctionnalités de la version initiale. Elle a notamment introduit les annulations de transactions, les rapports statistiques, les règles de fidélité configurables, la fusion des clients, l'anonymisation et la gestion des permissions.
 
-La séparation entre les modèles, les services métier, les vues et les formulaires a facilité cette évolution. L'utilisation de compteurs associés à un historique des transactions permet de consulter rapidement les soldes tout en conservant une traçabilité des opérations. Les modèles `MouvementFidelite` et `JournalAudit` renforcent cette traçabilité.
+La séparation entre les modèles, les services métier et les interfaces a facilité l'ajout de ces fonctionnalités. Les tests automatisés ont également permis de vérifier les règles métier et de limiter les régressions.
 
-## Difficultés rencontrées
+## 2. Ce que nous n'avions pas anticipé
 
-L'implémentation des annulations a représenté une difficulté particulière. Une transaction annulée peut avoir généré une récompense déjà utilisée, ce qui nécessite un mécanisme de dette d'étampes. Il était également nécessaire de conserver la cohérence entre les compteurs et l'historique.
+Lors de la conception de la V2, nous avions supposé que l'application serait utilisée dans un seul café.
 
-La gestion des permissions a révélé des incohérences dans les noms des groupes Django. Ces erreurs ont été corrigées grâce aux tests automatisés. La dernière exécution de la suite de tests métier de la V2 compte 75 tests réussis.
+Nous n'avions pas anticipé l'ouverture d'une deuxième succursale, le partage des cartes prépayées entre plusieurs établissements ni la nécessité de limiter les permissions des gérants à leur propre café.
 
-## Impact des nouvelles exigences
+Nous avions également utilisé SQLite et le serveur de développement Django sans prévoir immédiatement un environnement de production reproductible.
 
-La version 2 reposait sur l'hypothèse que l'application serait utilisée dans un seul café. Cette hypothèse est présente dans plusieurs parties du système : les modèles transactionnels, les services métier, les permissions et les rapports statistiques.
+## 3. L'hypothèse d'un seul café
 
-Les achats, les émissions de cartes et les annulations sont associés aux employés, mais ne possèdent aucune référence à une succursale. Les permissions reposent principalement sur les rôles des utilisateurs, sans restriction géographique. L'introduction d'un deuxième café nécessite donc des modifications dans plusieurs couches de l'application.
+L'hypothèse d'un seul café était présente à plusieurs endroits dans notre application :
 
-Cependant, les modèles `Client`, `Fidelite` et `CartePrepayee` sont déjà indépendants de la notion de café. Cette séparation constitue un avantage important pour la mise en place d'un programme de fidélité partagé entre plusieurs succursales.
+- Les transactions ne contenaient aucune référence à une succursale.
+- Les rapports statistiques portaient sur l'ensemble des transactions.
+- Les permissions dépendaient uniquement du rôle de l'utilisateur.
+- Les annulations ne vérifiaient pas l'établissement d'origine.
+- La configuration supposait une utilisation locale.
 
-## Préparation de la version 3
+L'ajout d'une succursale ne pouvait donc pas être réalisé uniquement en modifiant un modèle. Il nécessitait également des adaptations dans les services, les vues, les permissions et les rapports.
 
-Pour la version 3, nous souhaitons conserver les mécanismes métier existants tout en introduisant explicitement la notion de succursale et les affectations des employés. Les contrôles d'accès devront prendre en compte le rôle de l'utilisateur ainsi que les succursales auxquelles il est autorisé à accéder.
+Cependant, les clients, les soldes de fidélité et les cartes prépayées étaient déjà représentés indépendamment des interfaces. Cette séparation constituait une base favorable à leur partage entre plusieurs cafés.
 
-Le passage de SQLite à PostgreSQL et la conteneurisation représentent également de nouveaux défis. Nous devrons préserver les données existantes, vérifier les soldes avant et après la migration et séparer la configuration de développement de celle de production.
+## 4. Les décisions que nous prendrions autrement
 
-Cette évolution montre l'importance de la séparation des responsabilités, mais également les limites d'une conception fondée sur une hypothèse métier implicite. Nous chercherons à rendre cette hypothèse explicite dans la V3, sans introduire de complexité inutile.
+Avec le recul, nous accorderions davantage d'importance à la séparation entre les permissions liées aux rôles et celles liées au périmètre d'accès.
+
+Nous distinguerions également plus clairement la configuration de développement de celle de production.
+
+Cela ne signifie pas que toutes les fonctionnalités multisites auraient dû être développées dès la première version. Il aurait toutefois été avantageux de limiter davantage les hypothèses implicites concernant l'environnement d'exécution et le nombre d'établissements.
+
+## 5. Conclusion
+
+La version 2 constitue une base fonctionnelle et relativement bien structurée, mais certaines hypothèses limitent son évolution vers un réseau de cafés.
+
+La version 3 représente donc une occasion d'améliorer l'architecture sans réécrire entièrement l'application, tout en préservant les fonctionnalités existantes et les données historiques.

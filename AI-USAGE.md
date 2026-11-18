@@ -282,3 +282,48 @@ Le code et les recommandations ont été intégrés progressivement dans le proj
 Les membres de l'équipe demeurent responsables des décisions retenues, de la validation du comportement de l'application et du contenu remis dans le cadre du devoir.
 
 L'intelligence artificielle a constitué un outil d'assistance, et non une garantie de correction ou de conformité aux exigences.
+
+
+# Devoir 3 — Utilisation de l'intelligence artificielle
+
+## Outil utilisé
+
+- ChatGPT — OpenAI.
+
+## Utilisations
+
+L'intelligence artificielle a été utilisée comme outil d'assistance au développement de la version 3 de Café Fidélité.
+
+Elle a notamment contribué aux activités suivantes :
+
+- Analyse et compréhension de l'énoncé du devoir.
+- Identification des modifications nécessaires pour la gestion multisite.
+- Proposition de décisions architecturales et rédaction des ADR.
+- Conception des modèles Succursale et AffectationSuccursale.
+- Assistance à la modification des services métier.
+- Implémentation des permissions par succursale.
+- Adaptation des rapports statistiques.
+- Proposition de migrations Django.
+- Génération et adaptation de tests automatisés.
+- Configuration de Docker, PostgreSQL, Gunicorn et Nginx.
+- Assistance au diagnostic des erreurs techniques.
+- Proposition d'une procédure de migration de SQLite vers PostgreSQL.
+- Rédaction et amélioration de la documentation technique.
+
+## Méthode de travail
+
+Le développement a été organisé en plusieurs étapes successives. Les propositions de l'intelligence artificielle ont servi de base à l'implémentation et ont été adaptées à la structure existante du projet.
+
+Les commandes et les modifications ont été exécutées dans l'environnement de développement de l'équipe.
+
+Les résultats des tests et les messages d'erreur ont également été utilisés pour identifier les corrections nécessaires.
+
+## Limites et responsabilité
+
+Les propositions générées par l'intelligence artificielle peuvent contenir des erreurs ou des incompatibilités avec l'environnement technique.
+
+L'équipe demeure responsable de la compréhension du code, de la validation des fonctionnalités, des décisions architecturales et de la qualité du produit livré.
+
+Les résultats des tests et des migrations ne sont considérés comme validés qu'après leur exécution effective.
+
+L'utilisation de l'intelligence artificielle ne remplace pas les vérifications techniques ni la compréhension des concepts abordés dans le cours.
