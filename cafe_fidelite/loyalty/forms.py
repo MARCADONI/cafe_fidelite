@@ -4,6 +4,7 @@ from .models import Client
 
 from django.core.exceptions import ValidationError
 from cafe_fidelite.loyalty.models import Client
+from .models import Succursale
 
 
 class ClientForm(forms.ModelForm):
@@ -33,21 +34,50 @@ class RapportStatistiquesForm(forms.Form):
         input_formats=["%Y-%m-%d"],
     )
 
+    succursale = forms.ModelChoiceField(
+        queryset=Succursale.objects.none(),
+        label="Succursale",
+        required=False,
+        empty_label="Toutes les succursales",
+    )
+
+    def __init__(
+        self,
+        *args,
+        succursales=None,
+        est_proprietaire=False,
+        **kwargs
+    ):
+
+        super().__init__(*args, **kwargs)
+
+        if succursales is not None:
+
+            self.fields["succursale"].queryset = (
+                succursales.order_by("nom")
+            )
+
+        # Le gerant ne choisit pas sa succursale
+
+        if not est_proprietaire:
+
+            self.fields.pop("succursale")
+
     def clean(self):
+
         donnees = super().clean()
 
         debut = donnees.get("date_debut")
         fin = donnees.get("date_fin")
 
         if debut and fin and debut > fin:
+
             raise forms.ValidationError(
                 "La date de debut doit etre "
                 "anterieure ou egale a la date de fin."
             )
 
         return donnees
-
-
 
 class FusionClientForm(forms.Form):
 

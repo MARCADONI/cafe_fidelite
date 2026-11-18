@@ -1,27 +1,18 @@
-
-
 # =====================================================
 # IMPORTS PYTHON
 # =====================================================
-
 from datetime import date, datetime, timedelta, timezone as dt_timezone
-
-
 # =====================================================
 # IMPORTS DJANGO
 # =====================================================
-
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-
-
 # =====================================================
 # MODELES DE L'APPLICATION
 # =====================================================
-
 from cafe_fidelite.loyalty.models import (
     Client,
     Fidelite,
@@ -33,14 +24,10 @@ from cafe_fidelite.loyalty.models import (
     RegleFidelite,
     FusionClient,
     JournalAudit,
-    
 )
-
-
 # =====================================================
 # SERVICES DE L'APPLICATION
 # =====================================================
-
 from cafe_fidelite.loyalty.services import (
     obtenir_regle_fidelite,
     enregistrer_achat_payant,
@@ -55,19 +42,50 @@ from cafe_fidelite.loyalty.services import (
     anonymiser_client,
     verifier_client_actif,
 )
-
-
 # =====================================================
 # RAPPORTS STATISTIQUES
 # =====================================================
-
 from cafe_fidelite.loyalty.rapports import (
     generer_rapport,
 )
+from django.core.exceptions import PermissionDenied
+from django.db import IntegrityError, transaction
+from cafe_fidelite.loyalty.models import Succursale, AffectationSuccursale
+from cafe_fidelite.loyalty.services import programmer_regle_fidelite
+from cafe_fidelite.loyalty.services_succursales import (
+    obtenir_succursales_autorisees, obtenir_succursale_active,
+    verifier_acces_succursale,
+)
+
+
+def creer_employe_v3(username, role, *succursales, staff=False):
+    utilisateur = get_user_model().objects.create_user(username=username, is_staff=staff)
+    groupe, _ = Group.objects.get_or_create(name=role)
+    utilisateur.groups.add(groupe)
+    for succursale in succursales:
+        AffectationSuccursale.objects.create(employe=utilisateur, succursale=succursale)
+    return utilisateur
+
+
+def preparer_contexte_v3(test):
+    test.succursale_v3, _ = Succursale.objects.get_or_create(
+        code="TESTV3A", defaults={"nom": "Cafe test A", "active": True}
+    )
+    for attr, role in (("gerant", "Gerant"), ("barista", "Barista"), ("employe", "Barista")):
+        utilisateur = getattr(test, attr, None)
+        if utilisateur is not None:
+            groupe, _ = Group.objects.get_or_create(name=role)
+            utilisateur.groups.add(groupe)
+            AffectationSuccursale.objects.get_or_create(employe=utilisateur, succursale=test.succursale_v3)
+    test.proprietaire = creer_employe_v3("owner_fixture_v3", "Proprietaire", staff=True)
+    test.barista_v3 = creer_employe_v3("barista_fixture_v3", "Barista", test.succursale_v3)
+    if not RegleFidelite.objects.filter(date_entree_vigueur__lte=timezone.now()).exists():
+        RegleFidelite.objects.create(seuil=10, date_entree_vigueur=timezone.now()-timedelta(days=1))
+
+
 
 
 class RegleFideliteTests(TestCase):
-
     def setUp(self):
         RegleFidelite.objects.create(
             seuil=10,
@@ -75,6 +93,7 @@ class RegleFideliteTests(TestCase):
                 timezone.now() - timedelta(days=30)
             ),
         )
+        preparer_contexte_v3(self)
 
     def test_regle_actuelle(self):
         regle = obtenir_regle_fidelite()
@@ -87,7 +106,6 @@ class RegleFideliteTests(TestCase):
                 timezone.now() + timedelta(days=10)
             ),
         )
-
         regle = obtenir_regle_fidelite()
         self.assertEqual(regle.seuil, 10)
 
@@ -95,72 +113,58 @@ class RegleFideliteTests(TestCase):
         date_future = (
             timezone.now() + timedelta(days=10)
         )
-
         RegleFidelite.objects.create(
             seuil=12,
             date_entree_vigueur=date_future,
         )
-
         regle = obtenir_regle_fidelite(
             date_future + timedelta(minutes=1)
         )
-
         self.assertEqual(regle.seuil, 12)
 
 
 class AnnulationAchatPayantTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant = User.objects.create_user(
             username="gerant_test",
             password="mot_de_passe_test",
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.client = Client.objects.create(
             nom="Client Test",
             telephone="5551234567",
         )
-
         self.fidelite = Fidelite.objects.create(
             client=self.client,
             progression=5,
             recompenses=0,
         )
+        preparer_contexte_v3(self)
 
     def test_annulation_achat_simple(self):
         achat = enregistrer_achat_payant(
             self.client,
             employe=self.gerant,
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             6,
         )
-
         annuler_achat_payant(
             achat.id,
             self.gerant,
             "Erreur de saisie",
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             5,
         )
-
         self.assertTrue(
             Annulation.objects.filter(
                 achat=achat
@@ -171,144 +175,112 @@ class AnnulationAchatPayantTests(TestCase):
         self.fidelite.progression = 9
         self.fidelite.recompenses = 0
         self.fidelite.save()
-
         achat = enregistrer_achat_payant(
             self.client,
             employe=self.gerant,
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             0
         )
-
         self.assertEqual(
             self.fidelite.recompenses,
             1
         )
-
         annuler_achat_payant(
             achat.id,
             self.gerant,
             "Achat enregistre par erreur",
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             9
         )
-
         self.assertEqual(
             self.fidelite.recompenses,
             0
         )
-
         self.assertEqual(
             self.fidelite.dette_etampes,
             0
         )
-    
-    
+
     def test_mouvements_achat_avec_recompense(self):
         self.fidelite.progression = 9
         self.fidelite.recompenses = 0
         self.fidelite.dette_etampes = 0
         self.fidelite.save()
-
         achat = enregistrer_achat_payant(
             self.client,
             employe=self.gerant,
         )
-
         mouvements = list(
             achat.mouvements_fidelite.order_by("id")
         )
-
         self.assertEqual(len(mouvements), 2)
-
         total_etampes = sum(
             mouvement.variation_etampes
             for mouvement in mouvements
         )
-
         total_recompenses = sum(
             mouvement.variation_recompenses
             for mouvement in mouvements
         )
-
         self.assertEqual(total_etampes, -9)
         self.assertEqual(total_recompenses, 1)
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             0
         )
-
         self.assertEqual(
             self.fidelite.recompenses,
             1
         )
 
-
-    
     def test_annulation_cree_mouvement_compensatoire(self):
         self.fidelite.progression = 5
         self.fidelite.recompenses = 0
         self.fidelite.dette_etampes = 0
         self.fidelite.save()
-
         achat = enregistrer_achat_payant(
             self.client,
             employe=self.gerant,
         )
-
         annulation = annuler_achat_payant(
             achat.id,
             self.gerant,
             "Erreur de saisie",
         )
-
         mouvement = MouvementFidelite.objects.get(
             annulation=annulation
         )
-
         self.assertEqual(
             mouvement.variation_etampes,
             -1,
         )
-
         self.assertEqual(
             mouvement.variation_dette,
             0,
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.progression,
             5,
         )
 
-
-    
     def test_impossible_annuler_deux_fois(self):
         achat = enregistrer_achat_payant(
             self.client,
             employe=self.gerant,
         )
-
         annuler_achat_payant(
             achat.id,
             self.gerant,
             "Premiere annulation",
         )
-
         with self.assertRaises(ValueError):
             annuler_achat_payant(
                 achat.id,
@@ -317,60 +289,48 @@ class AnnulationAchatPayantTests(TestCase):
             )
 
 
-
-
 class UtilisationRecompenseTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant = User.objects.create_user(
             username="gerant_recompense_test",
             password="test12345",
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.client = Client.objects.create(
             nom="Client Recompense",
             telephone="5559876543",
         )
-
         self.fidelite = Fidelite.objects.create(
             client=self.client,
             progression=0,
             recompenses=2,
         )
+        preparer_contexte_v3(self)
 
     def test_utilisation_recompense(self):
         achat = utiliser_recompense(
             self.client,
             employe=self.gerant,
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.recompenses,
             1,
         )
-
         self.assertEqual(
             achat.type_achat,
             Achat.TypeAchat.GRATUIT_FIDELITE,
         )
-
         mouvement = MouvementFidelite.objects.get(
             achat=achat,
             type_mouvement=(
                 MouvementFidelite.TypeMouvement.UTILISATION
             ),
         )
-
         self.assertEqual(
             mouvement.variation_recompenses,
             -1,
@@ -381,31 +341,25 @@ class UtilisationRecompenseTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         annulation = annuler_utilisation_recompense(
             achat.id,
             self.gerant,
             "Erreur de saisie",
         )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.recompenses,
             2,
         )
-
         self.assertTrue(
             Annulation.objects.filter(
                 pk=annulation.pk,
                 achat=achat,
             ).exists()
         )
-
         mouvement = MouvementFidelite.objects.get(
             annulation=annulation
         )
-
         self.assertEqual(
             mouvement.variation_recompenses,
             1,
@@ -414,7 +368,6 @@ class UtilisationRecompenseTests(TestCase):
     def test_impossible_utiliser_sans_recompense(self):
         self.fidelite.recompenses = 0
         self.fidelite.save()
-
         with self.assertRaises(ValueError):
             utiliser_recompense(
                 self.client,
@@ -426,61 +379,50 @@ class UtilisationRecompenseTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         annuler_utilisation_recompense(
             achat.id,
             self.gerant,
             "Premiere annulation",
         )
-
         with self.assertRaises(ValueError):
             annuler_utilisation_recompense(
                 achat.id,
                 self.gerant,
                 "Deuxieme annulation",
             )
-
         self.fidelite.refresh_from_db()
-
         self.assertEqual(
             self.fidelite.recompenses,
             2,
         )
 
 
-
 class CartePrepayeeTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant = User.objects.create_user(
             username="gerant_carte_test",
             password="test12345",
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.client = Client.objects.create(
             nom="Client Carte",
             telephone="5552223333",
         )
+        preparer_contexte_v3(self)
 
     def test_emission_carte(self):
         carte = emettre_carte_prepayee(
             self.client,
             employe=self.gerant,
         )
-
         self.assertEqual(
             carte.cafes_restants,
             11,
         )
-
         self.assertTrue(
             EmissionCarte.objects.filter(
                 carte=carte
@@ -492,19 +434,15 @@ class CartePrepayeeTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         achat = utiliser_carte_prepayee(
             carte,
             employe=self.gerant,
         )
-
         carte.refresh_from_db()
-
         self.assertEqual(
             carte.cafes_restants,
             10,
         )
-
         self.assertEqual(
             achat.type_achat,
             Achat.TypeAchat.PREPAYE,
@@ -515,25 +453,20 @@ class CartePrepayeeTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         achat = utiliser_carte_prepayee(
             carte,
             employe=self.gerant,
         )
-
         annulation = annuler_utilisation_carte(
             achat.id,
             self.gerant,
             "Erreur de saisie",
         )
-
         carte.refresh_from_db()
-
         self.assertEqual(
             carte.cafes_restants,
             11,
         )
-
         self.assertTrue(
             Annulation.objects.filter(
                 pk=annulation.pk
@@ -545,15 +478,12 @@ class CartePrepayeeTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         annuler_vente_carte(
             carte.emission.id,
             self.gerant,
             "Vente enregistree par erreur",
         )
-
         carte.refresh_from_db()
-
         self.assertTrue(carte.est_annulee)
         self.assertFalse(carte.active)
 
@@ -562,12 +492,10 @@ class CartePrepayeeTests(TestCase):
             self.client,
             employe=self.gerant,
         )
-
         utiliser_carte_prepayee(
             carte,
             employe=self.gerant,
         )
-
         with self.assertRaises(ValueError):
             annuler_vente_carte(
                 carte.emission.id,
@@ -576,56 +504,49 @@ class CartePrepayeeTests(TestCase):
             )
 
 
-
 class RapportStatistiquesTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         groupe, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant = User.objects.create_user(
             username="gerant_rapport",
             password="test12345",
         )
         self.gerant.groups.add(groupe)
-
         self.barista = User.objects.create_user(
             username="barista_rapport",
             password="test12345",
         )
-
         self.client_cafe = Client.objects.create(
             nom="Client Rapport",
             telephone="5551112222",
         )
+        preparer_contexte_v3(self)
 
     def test_rapport_exclut_achat_annule(self):
         achat_valide = Achat.objects.create(
             client=self.client_cafe,
             type_achat=Achat.TypeAchat.PAYANT,
+            succursale=self.succursale_v3,
         )
-
         achat_annule = Achat.objects.create(
             client=self.client_cafe,
             type_achat=Achat.TypeAchat.PAYANT,
+            succursale=self.succursale_v3,
         )
-
         Annulation.objects.create(
             achat=achat_annule,
             gerant=self.gerant,
             motif="Erreur",
+            succursale=self.succursale_v3,
         )
-
         aujourd_hui = timezone.localdate()
-
         rapport = generer_rapport(
             aujourd_hui,
             aujourd_hui,
         )
-
         self.assertEqual(
             rapport["cafes_payants"],
             1,
@@ -636,20 +557,17 @@ class RapportStatistiquesTests(TestCase):
             client=self.client_cafe,
             cafes_restants=11,
         )
-
         EmissionCarte.objects.create(
             carte=carte,
             employe=self.gerant,
             date_emission=timezone.now(),
+            succursale=self.succursale_v3,
         )
-
         aujourd_hui = timezone.localdate()
-
         rapport = generer_rapport(
             aujourd_hui,
             aujourd_hui,
         )
-
         self.assertEqual(
             rapport["cartes_vendues"],
             1,
@@ -657,11 +575,9 @@ class RapportStatistiquesTests(TestCase):
 
     def test_barista_ne_peut_pas_voir_rapport(self):
         self.client.force_login(self.barista)
-
         reponse = self.client.get(
             reverse("loyalty:rapport_statistiques")
         )
-
         self.assertEqual(
             reponse.status_code,
             403,
@@ -669,7 +585,6 @@ class RapportStatistiquesTests(TestCase):
 
     def test_gerant_peut_voir_rapport(self):
         self.client.force_login(self.gerant)
-
         reponse = self.client.get(
             reverse("loyalty:rapport_statistiques"),
             {
@@ -677,122 +592,100 @@ class RapportStatistiquesTests(TestCase):
                 "date_fin": "2026-10-18",
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             200,
         )
-
         self.assertIn(
             "rapport",
             reponse.context,
         )
 
 
-
 class FusionClientTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_fusion",
             password="Test12345!"
         )
-
         self.employe = User.objects.create_user(
             username="employe_fusion",
             password="Test12345!"
         )
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.principal = Client.objects.create(
             nom="Alice",
             telephone="1111111111",
             courriel="alice@example.com"
         )
-
         self.secondaire = Client.objects.create(
             nom="Alice Dupont",
             telephone="2222222222",
             courriel="alice2@example.com"
         )
-
         self.fidelite_principale = (
             Fidelite.objects.get_or_create(
                 client=self.principal
             )[0]
         )
-
         self.fidelite_secondaire = (
             Fidelite.objects.get_or_create(
                 client=self.secondaire
             )[0]
         )
-
         self.fidelite_principale.progression = 7
         self.fidelite_principale.recompenses = 1
         self.fidelite_principale.dette_etampes = 0
         self.fidelite_principale.save()
-
         self.fidelite_secondaire.progression = 2
         self.fidelite_secondaire.recompenses = 2
         self.fidelite_secondaire.dette_etampes = 1
         self.fidelite_secondaire.save()
+        preparer_contexte_v3(self)
 
     def test_fusion_additionne_les_soldes(self):
         fusion = fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant
+            self.proprietaire
         )
-
         self.fidelite_principale.refresh_from_db()
         self.fidelite_secondaire.refresh_from_db()
         self.secondaire.refresh_from_db()
-
         self.assertEqual(
             self.fidelite_principale.progression,
             9
         )
-
         self.assertEqual(
             self.fidelite_principale.recompenses,
             3
         )
-
         self.assertEqual(
             self.fidelite_principale.dette_etampes,
             1
         )
-
         self.assertEqual(
             self.fidelite_secondaire.progression,
             0
         )
-
         self.assertEqual(
             self.fidelite_secondaire.recompenses,
             0
         )
-
         self.assertTrue(
             self.secondaire.est_fusionne
         )
-
         self.assertEqual(
             self.secondaire.fusionne_vers,
             self.principal
         )
-
         self.assertEqual(
             fusion.gerant,
-            self.gerant
+            self.proprietaire
         )
 
     def test_fusion_transfere_les_cartes(self):
@@ -801,20 +694,16 @@ class FusionClientTests(TestCase):
             cafes_restants=8,
             active=True
         )
-
         fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant
+            self.proprietaire
         )
-
         carte.refresh_from_db()
-
         self.assertEqual(
             carte.client,
             self.principal
         )
-
         self.assertEqual(
             carte.cafes_restants,
             8
@@ -825,9 +714,8 @@ class FusionClientTests(TestCase):
             fusionner_clients(
                 self.principal.id,
                 self.principal.id,
-                self.gerant
+                self.proprietaire
             )
-
         self.assertEqual(
             FusionClient.objects.count(),
             0
@@ -837,36 +725,31 @@ class FusionClientTests(TestCase):
         fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant
+            self.proprietaire
         )
-
         with self.assertRaises(ValueError):
             fusionner_clients(
                 self.principal.id,
                 self.secondaire.id,
-                self.gerant
+                self.proprietaire
             )
-
         self.assertEqual(
             FusionClient.objects.count(),
             1
         )
 
     def test_employe_ne_peut_pas_fusionner(self):
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(PermissionDenied):
             fusionner_clients(
                 self.principal.id,
                 self.secondaire.id,
                 self.employe
             )
-
         self.fidelite_principale.refresh_from_db()
-
         self.assertEqual(
             self.fidelite_principale.progression,
             7
         )
-
         self.assertEqual(
             FusionClient.objects.count(),
             0
@@ -875,54 +758,45 @@ class FusionClientTests(TestCase):
     def test_fusion_conserve_historique_achats(self):
         achat = Achat.objects.create(
             client=self.secondaire,
-            type_achat=Achat.TypeAchat.PAYANT
+            type_achat=Achat.TypeAchat.PAYANT,
+            succursale=self.succursale_v3,
         )
-
         fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant
+            self.proprietaire
         )
-
         achat.refresh_from_db()
-
         self.assertEqual(
             achat.client,
             self.secondaire
         )
-
         self.assertTrue(
             Achat.objects.filter(
                 pk=achat.pk
             ).exists()
         )
 
-    
     def test_fusion_cree_mouvements_compensatoires(self):
         fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant,
+            self.proprietaire,
         )
-
         mouvements = MouvementFidelite.objects.filter(
             type_mouvement=(
                 MouvementFidelite.TypeMouvement.FUSION
             )
         )
-
         self.assertEqual(mouvements.count(), 2)
-
         self.assertEqual(
             sum(m.variation_etampes for m in mouvements),
             0,
         )
-
         self.assertEqual(
             sum(m.variation_recompenses for m in mouvements),
             0,
         )
-
         self.assertEqual(
             sum(m.variation_dette for m in mouvements),
             0,
@@ -932,66 +806,53 @@ class FusionClientTests(TestCase):
         fusionner_clients(
             self.principal.id,
             self.secondaire.id,
-            self.gerant,
+            self.proprietaire,
         )
-
         self.secondaire.refresh_from_db()
-
         with self.assertRaises(ValueError):
             enregistrer_achat_payant(
-                self.secondaire
+                self.secondaire,
+                employe=self.barista_v3,
             )
 
 
-
 class FusionClientInterfaceTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_interface",
             password="Test12345!",
         )
-
         self.barista = User.objects.create_user(
             username="barista_interface",
             password="Test12345!",
         )
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.principal = Client.objects.create(
             nom="Alice",
             telephone="3333333333",
         )
-
         self.secondaire = Client.objects.create(
             nom="Alice Dupont",
             telephone="4444444444",
         )
-
         Fidelite.objects.get_or_create(
             client=self.principal
         )
-
         Fidelite.objects.get_or_create(
             client=self.secondaire
         )
-
         self.url = reverse(
             "loyalty:fusion_clients"
         )
+        preparer_contexte_v3(self)
 
-    def test_gerant_peut_ouvrir_page(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_ouvrir_page(self):
+        self.client.force_login(self.proprietaire)
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             200
@@ -999,9 +860,7 @@ class FusionClientInterfaceTests(TestCase):
 
     def test_barista_ne_peut_pas_ouvrir_page(self):
         self.client.force_login(self.barista)
-
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             403
@@ -1009,15 +868,13 @@ class FusionClientInterfaceTests(TestCase):
 
     def test_utilisateur_non_connecte_est_redirige(self):
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             302
         )
 
-    def test_gerant_peut_fusionner_clients(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_fusionner_clients(self):
+        self.client.force_login(self.proprietaire)
         reponse = self.client.post(
             self.url,
             {
@@ -1026,31 +883,25 @@ class FusionClientInterfaceTests(TestCase):
                 "confirmation": "on",
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             302
         )
-
         self.secondaire.refresh_from_db()
-
         self.assertTrue(
             self.secondaire.est_fusionne
         )
-
         self.assertEqual(
             self.secondaire.fusionne_vers_id,
             self.principal.pk
         )
-
         self.assertEqual(
             FusionClient.objects.count(),
             1
         )
 
     def test_formulaire_refuse_meme_client(self):
-        self.client.force_login(self.gerant)
-
+        self.client.force_login(self.proprietaire)
         reponse = self.client.post(
             self.url,
             {
@@ -1059,85 +910,69 @@ class FusionClientInterfaceTests(TestCase):
                 "confirmation": "on",
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             200
         )
-
         self.assertEqual(
             FusionClient.objects.count(),
             0
         )
-
         self.assertTrue(
             reponse.context["form"].errors
         )
 
 
-
 class AnonymisationClientTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         # Creer un gerant
         self.gerant = User.objects.create_user(
             username="gerant_anonymisation",
             password="Test12345!",
         )
-
         # Creer un barista
         self.barista = User.objects.create_user(
             username="barista_anonymisation",
             password="Test12345!",
         )
-
         # Attribuer le role de gerant
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         # Creer un client
         self.client_test = Client.objects.create(
             nom="Alice Dupont",
             telephone="5551234567",
             courriel="alice@example.com",
         )
-
         # Creer son compte de fidelite
         Fidelite.objects.get_or_create(
             client=self.client_test
         )
+        preparer_contexte_v3(self)
 
     def test_anonymisation_efface_donnees_personnelles(self):
         anonymiser_client(
             self.client_test.pk,
-            self.gerant,
+            self.proprietaire,
         )
-
         self.client_test.refresh_from_db()
-
         self.assertEqual(
             self.client_test.nom,
             "Client anonymise",
         )
-
         self.assertIsNone(
             self.client_test.telephone
         )
-
         self.assertEqual(
             self.client_test.courriel,
             "",
         )
-
         self.assertTrue(
             self.client_test.est_anonymise
         )
-
         self.assertIsNotNone(
             self.client_test.date_anonymisation
         )
@@ -1146,20 +981,17 @@ class AnonymisationClientTests(TestCase):
         achat = Achat.objects.create(
             client=self.client_test,
             type_achat=Achat.TypeAchat.PAYANT,
+            succursale=self.succursale_v3,
         )
-
         anonymiser_client(
             self.client_test.pk,
-            self.gerant,
+            self.proprietaire,
         )
-
         achat.refresh_from_db()
-
         self.assertEqual(
             achat.client_id,
             self.client_test.pk,
         )
-
         self.assertTrue(
             Achat.objects.filter(
                 pk=achat.pk
@@ -1167,18 +999,15 @@ class AnonymisationClientTests(TestCase):
         )
 
     def test_barista_ne_peut_pas_anonymiser(self):
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(PermissionDenied):
             anonymiser_client(
                 self.client_test.pk,
                 self.barista,
             )
-
         self.client_test.refresh_from_db()
-
         self.assertFalse(
             self.client_test.est_anonymise
         )
-
         self.assertEqual(
             self.client_test.nom,
             "Alice Dupont",
@@ -1187,13 +1016,12 @@ class AnonymisationClientTests(TestCase):
     def test_impossible_anonymiser_deux_fois(self):
         anonymiser_client(
             self.client_test.pk,
-            self.gerant,
+            self.proprietaire,
         )
-
         with self.assertRaises(ValueError):
             anonymiser_client(
                 self.client_test.pk,
-                self.gerant,
+                self.proprietaire,
             )
 
     def test_impossible_anonymiser_compte_fusionne(self):
@@ -1201,21 +1029,18 @@ class AnonymisationClientTests(TestCase):
             nom="Alice Principale",
             telephone="5559876543",
         )
-
         Fidelite.objects.get_or_create(
             client=principal
         )
-
         fusionner_clients(
             principal.pk,
             self.client_test.pk,
-            self.gerant,
+            self.proprietaire,
         )
-
         with self.assertRaises(ValueError):
             anonymiser_client(
                 self.client_test.pk,
-                self.gerant,
+                self.proprietaire,
             )
 
     def test_anonymisation_conserve_cartes(self):
@@ -1224,24 +1049,19 @@ class AnonymisationClientTests(TestCase):
             cafes_restants=8,
             active=True,
         )
-
         anonymiser_client(
             self.client_test.pk,
-            self.gerant,
+            self.proprietaire,
         )
-
         carte.refresh_from_db()
-
         self.assertEqual(
             carte.client_id,
             self.client_test.pk,
         )
-
         self.assertEqual(
             carte.cafes_restants,
             8,
         )
-
         self.assertTrue(
             CartePrepayee.objects.filter(
                 pk=carte.pk
@@ -1249,47 +1069,37 @@ class AnonymisationClientTests(TestCase):
         )
 
 
-
 class AnonymisationClientInterfaceTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_interface_anonymisation",
             password="Test12345!",
         )
-
         self.barista = User.objects.create_user(
             username="barista_interface_anonymisation",
             password="Test12345!",
         )
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.client_test = Client.objects.create(
             nom="Alice Dupont",
             telephone="5551234567",
             courriel="alice@example.com",
         )
-
         Fidelite.objects.get_or_create(
             client=self.client_test
         )
-
         self.url = reverse(
             "loyalty:anonymisation_client"
         )
+        preparer_contexte_v3(self)
 
-    def test_gerant_peut_ouvrir_page(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_ouvrir_page(self):
+        self.client.force_login(self.proprietaire)
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             200
@@ -1297,9 +1107,7 @@ class AnonymisationClientInterfaceTests(TestCase):
 
     def test_barista_ne_peut_pas_ouvrir_page(self):
         self.client.force_login(self.barista)
-
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             403
@@ -1307,15 +1115,13 @@ class AnonymisationClientInterfaceTests(TestCase):
 
     def test_utilisateur_non_connecte_est_redirige(self):
         reponse = self.client.get(self.url)
-
         self.assertEqual(
             reponse.status_code,
             302
         )
 
-    def test_gerant_peut_anonymiser_client(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_anonymiser_client(self):
+        self.client.force_login(self.proprietaire)
         reponse = self.client.post(
             self.url,
             {
@@ -1323,48 +1129,38 @@ class AnonymisationClientInterfaceTests(TestCase):
                 "confirmation": "on",
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             302
         )
-
         self.client_test.refresh_from_db()
-
         self.assertTrue(
             self.client_test.est_anonymise
         )
-
         self.assertEqual(
             self.client_test.nom,
             "Client anonymise"
         )
-
         self.assertIsNone(
             self.client_test.telephone
         )
 
     def test_confirmation_obligatoire(self):
-        self.client.force_login(self.gerant)
-
+        self.client.force_login(self.proprietaire)
         reponse = self.client.post(
             self.url,
             {
                 "client": self.client_test.pk,
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             200
         )
-
         self.client_test.refresh_from_db()
-
         self.assertFalse(
             self.client_test.est_anonymise
         )
-
         self.assertTrue(
             reponse.context["form"].errors
         )
@@ -1374,9 +1170,7 @@ class AnonymisationClientInterfaceTests(TestCase):
         self.client_test.save(
             update_fields=["est_anonymise"]
         )
-
-        self.client.force_login(self.gerant)
-
+        self.client.force_login(self.proprietaire)
         reponse = self.client.post(
             self.url,
             {
@@ -1384,41 +1178,34 @@ class AnonymisationClientInterfaceTests(TestCase):
                 "confirmation": "on",
             },
         )
-
         self.assertEqual(
             reponse.status_code,
             200
         )
-
         self.assertTrue(
             reponse.context["form"].errors
         )
-
         self.client_test.refresh_from_db()
-
         self.assertTrue(
             self.client_test.est_anonymise
         )
 
 
-
 class ProtectionClientInactifTests(TestCase):
-
     def setUp(self):
         self.client_test = Client.objects.create(
             nom="Client Test",
             telephone="5551112222",
         )
-
         Fidelite.objects.get_or_create(
             client=self.client_test
         )
+        preparer_contexte_v3(self)
 
     def test_client_actif_est_accepte(self):
         resultat = verifier_client_actif(
             self.client_test
         )
-
         self.assertTrue(resultat)
 
     def test_client_anonymise_est_refuse(self):
@@ -1426,7 +1213,6 @@ class ProtectionClientInactifTests(TestCase):
         self.client_test.save(
             update_fields=["est_anonymise"]
         )
-
         with self.assertRaises(ValueError):
             verifier_client_actif(
                 self.client_test
@@ -1437,7 +1223,6 @@ class ProtectionClientInactifTests(TestCase):
         self.client_test.save(
             update_fields=["est_fusionne"]
         )
-
         with self.assertRaises(ValueError):
             verifier_client_actif(
                 self.client_test
@@ -1448,12 +1233,11 @@ class ProtectionClientInactifTests(TestCase):
         self.client_test.save(
             update_fields=["est_anonymise"]
         )
-
         with self.assertRaises(ValueError):
             enregistrer_achat_payant(
-                self.client_test
+                self.client_test,
+                employe=self.barista_v3,
             )
-
         self.assertEqual(
             Achat.objects.filter(
                 client=self.client_test
@@ -1466,12 +1250,11 @@ class ProtectionClientInactifTests(TestCase):
         self.client_test.save(
             update_fields=["est_fusionne"]
         )
-
         with self.assertRaises(ValueError):
             enregistrer_achat_payant(
-                self.client_test
+                self.client_test,
+                employe=self.barista_v3,
             )
-
         self.assertEqual(
             Achat.objects.filter(
                 client=self.client_test
@@ -1480,52 +1263,44 @@ class ProtectionClientInactifTests(TestCase):
         )
 
 
-
 class JournalAuditTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_audit",
             password="Test12345!",
         )
+        preparer_contexte_v3(self)
 
     def test_creation_journal_audit(self):
         """
         Verifie qu'une entree d'audit peut etre creee.
         """
-
         journal = JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.FUSION,
             objet_id=10,
             description="Fusion de clients",
         )
-
         self.assertEqual(
             journal.action,
             JournalAudit.TypeAction.FUSION,
         )
-
         self.assertEqual(
             journal.utilisateur,
             self.gerant,
         )
-
         self.assertEqual(journal.objet_id, 10)
 
     def test_date_action_automatique(self):
         """
         Verifie que la date est ajoutee automatiquement.
         """
-
         journal = JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.ANONYMISATION,
             objet_id=20,
         )
-
         self.assertIsNotNone(journal.date_action)
 
     def test_utilisateur_facultatif(self):
@@ -1533,15 +1308,12 @@ class JournalAuditTests(TestCase):
         Verifie qu'une entree reste possible
         sans utilisateur associe.
         """
-
         journal = JournalAudit.objects.create(
             utilisateur=None,
             action=JournalAudit.TypeAction.ANNULATION_ACHAT,
             objet_id=30,
         )
-
         self.assertIsNone(journal.utilisateur)
-
         self.assertEqual(
             JournalAudit.objects.count(),
             1,
@@ -1551,73 +1323,59 @@ class JournalAuditTests(TestCase):
         """
         Verifie la representation textuelle du journal.
         """
-
         journal = JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.REGLE_FIDELITE,
             objet_id=40,
         )
-
         affichage = str(journal)
-
         self.assertIn(
             "Modification de regle",
             affichage,
         )
 
 
-
 class JournalAuditIntegrationTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_integration",
             password="Test12345!",
         )
-
         groupe, _ = Group.objects.get_or_create(
             name="Gerant"
         )
         self.gerant.groups.add(groupe)
-
         self.client1 = Client.objects.create(
             nom="Client Principal",
             telephone="1111111111",
         )
-
         self.client2 = Client.objects.create(
             nom="Client Secondaire",
             telephone="2222222222",
         )
-
         Fidelite.objects.get_or_create(
             client=self.client1
         )
-
         Fidelite.objects.get_or_create(
             client=self.client2
         )
+        preparer_contexte_v3(self)
 
     def test_fusion_cree_journal_audit(self):
         """
         Une fusion reussie doit etre journalisee.
         """
-
         nombre_avant = JournalAudit.objects.count()
-
         fusionner_clients(
             client_principal_id=self.client1.pk,
             client_secondaire_id=self.client2.pk,
-            gerant=self.gerant,
+            gerant=self.proprietaire,
         )
-
         self.assertEqual(
             JournalAudit.objects.count(),
             nombre_avant + 1,
         )
-
         self.assertTrue(
             JournalAudit.objects.filter(
                 action=JournalAudit.TypeAction.FUSION,
@@ -1628,19 +1386,15 @@ class JournalAuditIntegrationTests(TestCase):
         """
         Une anonymisation reussie doit etre journalisee.
         """
-
         nombre_avant = JournalAudit.objects.count()
-
         anonymiser_client(
             client_id=self.client1.pk,
-            gerant=self.gerant,
+            gerant=self.proprietaire,
         )
-
         self.assertEqual(
             JournalAudit.objects.count(),
             nombre_avant + 1,
         )
-
         self.assertTrue(
             JournalAudit.objects.filter(
                 action=JournalAudit.TypeAction.ANONYMISATION,
@@ -1653,16 +1407,13 @@ class JournalAuditIntegrationTests(TestCase):
         Une fusion invalide ne doit pas produire
         d'audit de fusion reussie.
         """
-
         nombre_avant = JournalAudit.objects.count()
-
         with self.assertRaises(ValueError):
             fusionner_clients(
                 client_principal_id=self.client1.pk,
                 client_secondaire_id=self.client1.pk,
-                gerant=self.gerant,
+                gerant=self.proprietaire,
             )
-
         self.assertEqual(
             JournalAudit.objects.count(),
             nombre_avant,
@@ -1673,20 +1424,16 @@ class JournalAuditIntegrationTests(TestCase):
         Une deuxieme anonymisation doit etre refusee
         sans creer un nouvel audit.
         """
-
         anonymiser_client(
             client_id=self.client1.pk,
-            gerant=self.gerant,
+            gerant=self.proprietaire,
         )
-
         nombre_avant = JournalAudit.objects.count()
-
         with self.assertRaises(ValueError):
             anonymiser_client(
                 client_id=self.client1.pk,
-                gerant=self.gerant,
+                gerant=self.proprietaire,
             )
-
         self.assertEqual(
             JournalAudit.objects.count(),
             nombre_avant,
@@ -1694,39 +1441,30 @@ class JournalAuditIntegrationTests(TestCase):
 
 
 class JournalAuditInterfaceTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_audit_interface",
             password="Test12345!",
         )
-
         self.employe = User.objects.create_user(
             username="employe_audit_interface",
             password="Test12345!",
         )
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.gerant.groups.add(groupe_gerant)
-
         self.url = reverse("loyalty:journal_audit")
+        preparer_contexte_v3(self)
 
     def test_gerant_peut_consulter_journal(self):
         """
         Un gerant peut consulter le journal.
         """
-
         self.client.force_login(self.gerant)
-
         response = self.client.get(self.url)
-
         self.assertEqual(response.status_code, 200)
-
         self.assertTemplateUsed(
             response,
             "loyalty/journal_audit.html",
@@ -1736,22 +1474,16 @@ class JournalAuditInterfaceTests(TestCase):
         """
         Un employe ordinaire doit recevoir HTTP 403.
         """
-
         self.client.force_login(self.employe)
-
         response = self.client.get(self.url)
-
         self.assertEqual(response.status_code, 403)
 
     def test_utilisateur_non_connecte_est_redirige(self):
         """
         Un visiteur non connecte doit etre redirige.
         """
-
         response = self.client.get(self.url)
-
         self.assertEqual(response.status_code, 302)
-
         self.assertIn(
             "next=",
             response["Location"],
@@ -1761,23 +1493,18 @@ class JournalAuditInterfaceTests(TestCase):
         """
         Les operations enregistrees doivent apparaitre.
         """
-
         JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.FUSION,
             objet_id=15,
             description="Fusion de deux clients",
         )
-
-        self.client.force_login(self.gerant)
-
+        self.client.force_login(self.proprietaire)
         response = self.client.get(self.url)
-
         self.assertContains(
             response,
             "Fusion de deux clients",
         )
-
         self.assertContains(
             response,
             "Fusion de clients",
@@ -1787,179 +1514,137 @@ class JournalAuditInterfaceTests(TestCase):
         """
         Les operations recentes apparaissent en premier.
         """
-
         ancien = JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.FUSION,
             objet_id=10,
             description="Operation ancienne",
         )
-
         recent = JournalAudit.objects.create(
             utilisateur=self.gerant,
             action=JournalAudit.TypeAction.ANONYMISATION,
             objet_id=20,
             description="Operation recente",
         )
-
         maintenant = timezone.now()
-
         JournalAudit.objects.filter(
             pk=ancien.pk
         ).update(
             date_action=maintenant - timezone.timedelta(days=2)
         )
-
         JournalAudit.objects.filter(
             pk=recent.pk
         ).update(
             date_action=maintenant
         )
-
-        self.client.force_login(self.gerant)
-
+        self.client.force_login(self.proprietaire)
         response = self.client.get(self.url)
-
         journaux = list(response.context["journaux"])
-
         self.assertEqual(journaux[0].pk, recent.pk)
         self.assertEqual(journaux[1].pk, ancien.pk)
 
 
-
 class PermissionsEmployesTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.barista = User.objects.create_user(
             username="barista_test",
             password="Test12345!"
         )
-
         self.gerant = User.objects.create_user(
             username="gerant_test",
             password="Test12345!"
         )
-
         groupe_barista, _ = Group.objects.get_or_create(
             name="Barista"
         )
-
         groupe_gerant, _ = Group.objects.get_or_create(
             name="Gerant"
         )
-
         self.barista.groups.add(groupe_barista)
         self.gerant.groups.add(groupe_gerant)
+        preparer_contexte_v3(self)
 
     def test_barista_ne_peut_pas_acceder_aux_rapports(self):
         self.client.force_login(self.barista)
-
         response = self.client.get(
             reverse("loyalty:rapport_statistiques")
         )
-
         self.assertEqual(response.status_code, 403)
 
     def test_gerant_peut_acceder_aux_rapports(self):
         self.client.force_login(self.gerant)
-
         response = self.client.get(
             reverse("loyalty:rapport_statistiques")
         )
-
         self.assertEqual(response.status_code, 200)
-
-
         # ==========================================
     # TESTS DES PERMISSIONS : FUSION DES CLIENTS
     # ==========================================
 
     def test_barista_ne_peut_pas_fusionner_clients(self):
         self.client.force_login(self.barista)
-
         response = self.client.get(
             reverse("loyalty:fusion_clients")
         )
-
         self.assertEqual(response.status_code, 403)
 
-    def test_gerant_peut_acceder_fusion_clients(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_acceder_fusion_clients(self):
+        self.client.force_login(self.proprietaire)
         response = self.client.get(
             reverse("loyalty:fusion_clients")
         )
-
         self.assertEqual(response.status_code, 200)
-
     # ==========================================
     # TESTS DES PERMISSIONS : ANONYMISATION
     # ==========================================
 
     def test_barista_ne_peut_pas_anonymiser_client(self):
         self.client.force_login(self.barista)
-
         response = self.client.get(
             reverse("loyalty:anonymisation_client")
         )
-
         self.assertEqual(response.status_code, 403)
 
-    def test_gerant_peut_acceder_anonymisation(self):
-        self.client.force_login(self.gerant)
-
+    def test_proprietaire_peut_acceder_anonymisation(self):
+        self.client.force_login(self.proprietaire)
         response = self.client.get(
             reverse("loyalty:anonymisation_client")
         )
-
         self.assertEqual(response.status_code, 200)
-
     # ==========================================
     # TESTS DES PERMISSIONS : JOURNAL D'AUDIT
     # ==========================================
 
     def test_barista_ne_peut_pas_consulter_audit(self):
         self.client.force_login(self.barista)
-
         response = self.client.get(
             reverse("loyalty:journal_audit")
         )
-
         self.assertEqual(response.status_code, 403)
 
     def test_gerant_peut_consulter_audit(self):
         self.client.force_login(self.gerant)
-
         response = self.client.get(
             reverse("loyalty:journal_audit")
         )
-
         self.assertEqual(response.status_code, 200)
 
 
-
-
 class AnnulationAchatTests(TestCase):
-
     def setUp(self):
         User = get_user_model()
-
         self.gerant = User.objects.create_user(
             username="gerant_annulation",
             password="Test12345!",
         )
-
         groupe, _ = Group.objects.get_or_create(
             name="Gerant"
         )
         self.gerant.groups.add(groupe)
-
         self.client_cafe = Client.objects.create(
             nom="Client Test Annulation",
         )
-
         RegleFidelite.objects.create(
             seuil=10,
             date_entree_vigueur=(
@@ -1967,6 +1652,7 @@ class AnnulationAchatTests(TestCase):
             ),
             cree_par=self.gerant,
         )
+        preparer_contexte_v3(self)
 
     def test_annulation_recompense_disponible(self):
         # Enregistrer 10 achats payants
@@ -1977,31 +1663,24 @@ class AnnulationAchatTests(TestCase):
             )
             for _ in range(10)
         ]
-
         fidelite = Fidelite.objects.get(
             client=self.client_cafe
         )
-
         self.assertEqual(fidelite.recompenses, 1)
-
         # Annuler le 10e achat
         annulation = annuler_achat_payant(
             achat_id=achats[-1].pk,
             gerant=self.gerant,
             motif="Achat attribue au mauvais client",
         )
-
         fidelite.refresh_from_db()
-
         self.assertEqual(fidelite.progression, 9)
         self.assertEqual(fidelite.recompenses, 0)
         self.assertEqual(fidelite.dette_etampes, 0)
-
         self.assertEqual(
             annulation.gerant,
             self.gerant,
         )
-
         self.assertTrue(
             Annulation.objects.filter(
                 achat=achats[-1]
@@ -2017,24 +1696,20 @@ class AnnulationAchatTests(TestCase):
             )
             for _ in range(10)
         ]
-
         # Consommer le cafe gratuit
         utiliser_recompense(
             self.client_cafe,
             employe=self.gerant,
         )
-
         # Annuler le 10e achat
         annuler_achat_payant(
             achat_id=achats[-1].pk,
             gerant=self.gerant,
             motif="Erreur de client",
         )
-
         fidelite = Fidelite.objects.get(
             client=self.client_cafe
         )
-
         self.assertEqual(fidelite.progression, 0)
         self.assertEqual(fidelite.recompenses, 0)
         self.assertEqual(fidelite.dette_etampes, 1)
@@ -2044,16 +1719,204 @@ class AnnulationAchatTests(TestCase):
             self.client_cafe,
             employe=self.gerant,
         )
-
         annuler_achat_payant(
             achat_id=achat.pk,
             gerant=self.gerant,
             motif="Premiere annulation",
         )
-
         with self.assertRaises(ValueError):
             annuler_achat_payant(
                 achat_id=achat.pk,
                 gerant=self.gerant,
                 motif="Deuxieme annulation",
             )
+
+
+
+
+class MultisiteV3Tests(TestCase):
+    def setUp(self):
+        self.a = Succursale.objects.create(code="V3A", nom="Cafe A")
+        self.b = Succursale.objects.create(code="V3B", nom="Cafe B")
+        self.barista = creer_employe_v3("v3_barista", "Barista", self.a, self.b)
+        self.ga = creer_employe_v3("v3_ga", "Gerant", self.a)
+        self.gb = creer_employe_v3("v3_gb", "Gerant", self.b)
+        self.owner = creer_employe_v3("v3_owner", "Proprietaire", staff=True)
+        self.cafe_client = Client.objects.create(nom="Client multisite")
+        RegleFidelite.objects.create(seuil=10, date_entree_vigueur=timezone.now()-timedelta(minutes=1))
+
+    def achat(self, succursale):
+        return enregistrer_achat_payant(self.cafe_client, employe=self.barista, succursale=succursale)
+
+
+    def test_code_unique(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Succursale.objects.create(code=self.a.code, nom="Doublon")
+
+
+    def test_affectation_unique(self):
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            AffectationSuccursale.objects.create(employe=self.ga, succursale=self.a)
+
+
+    def test_barista_multisite(self):
+        self.assertEqual(set(obtenir_succursales_autorisees(self.barista)), {self.a, self.b})
+        with self.assertRaises(PermissionDenied):
+            obtenir_succursale_active(self.barista)
+
+
+    def test_gerant_monosite(self):
+        self.assertEqual(obtenir_succursale_active(self.ga), self.a)
+        with self.assertRaises(PermissionDenied):
+            verifier_acces_succursale(self.ga, self.b)
+
+
+    def test_gerant_double_affectation_refuse_acces(self):
+        AffectationSuccursale.objects.create(employe=self.ga, succursale=self.b)
+        self.assertFalse(obtenir_succursales_autorisees(self.ga).exists())
+
+
+    def test_succursale_inactive(self):
+        self.b.active = False
+        self.b.save()
+        with self.assertRaises(PermissionDenied):
+            self.achat(self.b)
+        self.assertFalse(Achat.objects.filter(client=self.cafe_client).exists())
+
+
+    def test_fidelite_globale(self):
+        for _ in range(9):
+            self.achat(self.a)
+        self.achat(self.b)
+        fidelite = Fidelite.objects.get(client=self.cafe_client)
+        self.assertEqual((fidelite.progression, fidelite.recompenses), (0, 1))
+        gratuit = utiliser_recompense(self.cafe_client, employe=self.barista, succursale=self.a)
+        self.assertEqual(gratuit.succursale, self.a)
+        fidelite.refresh_from_db()
+        self.assertEqual(fidelite.recompenses, 0)
+        self.assertEqual(Achat.objects.filter(succursale=self.b, client=self.cafe_client).count(), 1)
+
+
+    def test_carte_globale(self):
+        carte = emettre_carte_prepayee(self.cafe_client, employe=self.barista, succursale=self.a)
+        achat = utiliser_carte_prepayee(carte, employe=self.barista, succursale=self.b)
+        carte.refresh_from_db()
+        self.assertEqual(carte.cafes_restants, 10)
+        self.assertEqual(carte.emission.succursale, self.a)
+        self.assertEqual(achat.succursale, self.b)
+        with self.assertRaises(PermissionDenied):
+            annuler_utilisation_carte(achat.pk, self.ga, "Hors site")
+        annulation = annuler_utilisation_carte(achat.pk, self.gb, "Erreur")
+        self.assertEqual(annulation.succursale, self.b)
+        carte.refresh_from_db()
+        self.assertEqual(carte.cafes_restants, 11)
+
+
+    def test_annulation_achat_permissions(self):
+        achat = self.achat(self.b)
+        for utilisateur in (self.ga, self.barista):
+            with self.subTest(utilisateur=utilisateur.username):
+                with self.assertRaises(PermissionDenied):
+                    annuler_achat_payant(achat.pk, utilisateur, "Interdit")
+        self.assertFalse(Annulation.objects.filter(achat=achat).exists())
+        annulation = annuler_achat_payant(achat.pk, self.owner, "Correction")
+        self.assertEqual(annulation.succursale, self.b)
+
+
+    def test_annulation_vente_permissions(self):
+        carte = emettre_carte_prepayee(self.cafe_client, employe=self.barista, succursale=self.a)
+        with self.assertRaises(PermissionDenied):
+            annuler_vente_carte(carte.emission.pk, self.gb, "Interdit")
+        annulation = annuler_vente_carte(carte.emission.pk, self.ga, "Correction")
+        self.assertEqual(annulation.succursale, self.a)
+
+
+    def test_rapport_local_global(self):
+        self.achat(self.a)
+        self.achat(self.b)
+        jour = timezone.localdate()
+        self.assertEqual(generer_rapport(jour, jour, succursale=self.a)["cafes_payants"], 1)
+        self.assertEqual(generer_rapport(jour, jour, succursale=self.b)["cafes_payants"], 1)
+        self.assertEqual(generer_rapport(jour, jour)["cafes_payants"], 2)
+
+
+    def test_rapport_parametre_falsifie(self):
+        self.achat(self.b)
+        self.client.force_login(self.ga)
+        jour = timezone.localdate().isoformat()
+        response = self.client.get(reverse("loyalty:rapport_statistiques"), {"date_debut": jour, "date_fin": jour, "succursale": self.b.pk})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["rapport"]["cafes_payants"], 0)
+
+
+    def test_selection_succursale_interdite(self):
+        self.client.force_login(self.ga)
+        response = self.client.post(reverse("loyalty:choisir_succursale"), {"succursale_id": self.b.pk})
+        self.assertEqual(response.status_code, 403)
+
+
+    def test_annulation_post_interdite(self):
+        achat = self.achat(self.b)
+        self.client.force_login(self.ga)
+        response = self.client.post(reverse("loyalty:annuler_transaction"), {"type_transaction": "payant", "transaction_id": achat.pk, "motif": "Interdit"})
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Annulation.objects.filter(achat=achat).exists())
+
+
+    def test_operations_globales_interdites_gerant(self):
+        autre = Client.objects.create(nom="Autre")
+        with self.assertRaises(PermissionDenied):
+            fusionner_clients(self.cafe_client.pk, autre.pk, self.ga)
+        with self.assertRaises(PermissionDenied):
+            anonymiser_client(self.cafe_client.pk, self.ga)
+        for nom in ("fusion_clients", "anonymisation_client"):
+            self.client.force_login(self.ga)
+            self.assertEqual(self.client.get(reverse("loyalty:"+nom)).status_code, 403)
+
+
+    def test_regle_proprietaire(self):
+        future = timezone.now()+timedelta(days=10)
+        with self.assertRaises(PermissionDenied):
+            programmer_regle_fidelite(12, future, self.ga)
+        regle = programmer_regle_fidelite(12, future, self.owner)
+        self.assertEqual(regle.cree_par, self.owner)
+        self.assertTrue(JournalAudit.objects.filter(action=JournalAudit.TypeAction.REGLE_FIDELITE, objet_id=regle.pk, succursale__isnull=True).exists())
+        self.assertEqual(obtenir_regle_fidelite().seuil, 10)
+
+
+    def test_audit_local_global(self):
+        local = JournalAudit.objects.create(utilisateur=self.ga, succursale=self.a, action=JournalAudit.TypeAction.ANNULATION_ACHAT, description="Local A")
+        autre = JournalAudit.objects.create(utilisateur=self.gb, succursale=self.b, action=JournalAudit.TypeAction.ANNULATION_ACHAT, description="Local B")
+        global_ = JournalAudit.objects.create(utilisateur=self.owner, action=JournalAudit.TypeAction.FUSION, description="Global")
+        self.client.force_login(self.ga)
+        response = self.client.get(reverse("loyalty:journal_audit"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.context["journaux"]), {local})
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("loyalty:journal_audit"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue({local, autre, global_}.issubset(set(response.context["journaux"])))
+
+
+    def test_admin_permissions(self):
+        from django.contrib import admin
+        from django.test import RequestFactory
+        request = RequestFactory().get("/admin/")
+        request.user = self.owner
+        self.assertTrue(admin.site._registry[Succursale].has_add_permission(request))
+        for modele in (Achat, Client, Fidelite, CartePrepayee):
+            interface = admin.site._registry[modele]
+            self.assertTrue(interface.has_view_permission(request))
+            self.assertFalse(interface.has_add_permission(request))
+            self.assertFalse(interface.has_change_permission(request))
+            self.assertFalse(interface.has_delete_permission(request))
+        self.assertFalse(admin.site._registry[get_user_model()].has_change_permission(request))
+        request.user = self.ga
+        self.assertFalse(admin.site._registry[Succursale].has_add_permission(request))
+
+
+    def test_admin_double_affectation_gerant(self):
+        from cafe_fidelite.loyalty.admin import AffectationSuccursaleAdminForm
+        form = AffectationSuccursaleAdminForm(data={"employe": self.ga.pk, "succursale": self.b.pk, "active": True})
+        self.assertFalse(form.is_valid())
+        self.assertIn("succursale", form.errors)

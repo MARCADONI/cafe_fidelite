@@ -76,6 +76,7 @@
                 <th>Action</th>
                 <th>Objet ID</th>
                 <th>Description</th>
+                <th>Succursale</th>
             </tr>
         </thead>
 
@@ -100,6 +101,13 @@
 
                 <td>
                     {{ journal.description }}
+                </td>
+                <td>
+                    {% if journal.succursale %}
+                        {{ journal.succursale.code }}
+                    {% else %}
+                        Reseau
+                    {% endif %}
                 </td>
             </tr>
 

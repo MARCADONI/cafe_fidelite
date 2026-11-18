@@ -2,7 +2,9 @@ from .models import Achat
 from .models import Client
 from .models import Fidelite
 from .models import CartePrepayee
+from django.core.exceptions import PermissionDenied
 
+from .services_succursales import est_proprietaire
 from .services_succursales import (
     obtenir_succursale_active,
     verifier_acces_succursale,
@@ -379,57 +381,67 @@ def programmer_regle_fidelite(
     gerant,
 ):
     """
-    Programme un nouveau seuil de fidelite.
+    Programme une nouvelle regle globale
+    de fidelite pour toutes les succursales.
+
+    Operation reservee au proprietaire.
     """
 
-    if not gerant.is_authenticated:
-        raise PermissionError(
-            "Connexion requise."
+    # 1. Verifier les permissions
+
+    if not est_proprietaire(gerant):
+
+        raise PermissionDenied(
+            "Seul le proprietaire peut modifier "
+            "les regles de fidelite."
         )
 
-    if not gerant.groups.filter(
-        name="Gerant"
-    ).exists():
-        raise PermissionError(
-            "Seul un gerant peut modifier les regles."
-        )
+    # 2. Verifier le seuil
 
     if seuil < 1:
+
         raise ValueError(
             "Le seuil doit etre superieur a zero."
         )
 
+    # 3. Verifier le fuseau horaire
+
     if timezone.is_naive(date_entree_vigueur):
+
         raise ValueError(
             "La date doit inclure un fuseau horaire."
         )
 
+    # 4. Verifier la date d'entree en vigueur
+
     if date_entree_vigueur <= timezone.now():
+
         raise ValueError(
             "La date d'entree en vigueur doit etre future."
         )
 
-        regle = RegleFidelite.objects.create(
+    # 5. Creer la nouvelle regle
+
+    regle = RegleFidelite.objects.create(
         seuil=seuil,
         date_entree_vigueur=date_entree_vigueur,
         cree_par=gerant,
     )
 
+    # 6. Journaliser l'operation globale
+
     JournalAudit.objects.create(
         utilisateur=gerant,
-        succursale=annulation.succursale,
+        succursale=None,
         action=JournalAudit.TypeAction.REGLE_FIDELITE,
         objet_id=regle.pk,
         description=(
-            f"Programmation du seuil de fidelite "
-            f"a {seuil} etampes."
+            f"Nouveau seuil de fidelite : {seuil} etampes. "
+            f"Entree en vigueur : {date_entree_vigueur}."
         ),
     )
 
     return regle
-
-
-
 
 
 @transaction.atomic
@@ -959,20 +971,14 @@ def fusionner_clients(
     - Les mouvements de fusion sont enregistres.
     """
 
-    # 1. Verifier les permissions du gerant
-    if (
-        not gerant
-        or not gerant.is_authenticated
-        or not (
-            gerant.is_superuser
-            or gerant.groups.filter(
-                name="Gerant"
-            ).exists()
+    # 1. Verifier les permissions du proprietaire
+    if not est_proprietaire(gerant):
+
+        raise PermissionDenied(
+            "Seul le proprietaire peut fusionner "
+            "des comptes clients."
         )
-    ):
-        raise PermissionError(
-            "Seul un gerant peut fusionner des clients."
-        )
+
 
     # 2. Empecher la fusion avec soi-meme
     if client_principal_id == client_secondaire_id:
@@ -1146,7 +1152,7 @@ def fusionner_clients(
 
     JournalAudit.objects.create(
         utilisateur=gerant,
-        succursale=annulation.succursale,
+        succursale=None,
         action=JournalAudit.TypeAction.FUSION,
         objet_id=fusion.pk,
         description=(
@@ -1168,18 +1174,11 @@ def anonymiser_client(client_id, gerant):
     """
 
     # 1. Verifier les permissions
-    if (
-        not gerant
-        or not gerant.is_authenticated
-        or not (
-            gerant.is_superuser
-            or gerant.groups.filter(
-                name="Gerant"
-            ).exists()
-        )
-    ):
-        raise PermissionError(
-            "Seul un gerant peut anonymiser un client."
+    if not est_proprietaire(gerant):
+
+        raise PermissionDenied(
+            "Seul le proprietaire peut anonymiser "
+            "un compte client."
         )
 
     # 2. Recuperer et verrouiller le client
@@ -1222,7 +1221,7 @@ def anonymiser_client(client_id, gerant):
 
     JournalAudit.objects.create(
         utilisateur=gerant,
-        succursale=annulation.succursale,
+        succursale=None,
         action=JournalAudit.TypeAction.ANONYMISATION,
         objet_id=client.pk,
         description=(

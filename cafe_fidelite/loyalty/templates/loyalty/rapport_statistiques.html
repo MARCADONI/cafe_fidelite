@@ -60,46 +60,108 @@
 </head>
 
 <body>
+
 <main>
+
     <h1>Rapports statistiques</h1>
 
+    {% if succursale_gerant %}
+
+        <p>
+            <strong>Votre succursale :</strong>
+
+            {{ succursale_gerant.nom }}
+
+            ({{ succursale_gerant.code }})
+        </p>
+
+    {% endif %}
+
     <div class="formulaire">
+
         <form method="get">
+
             {{ formulaire.as_p }}
+
             <button type="submit">
                 Generer le rapport
             </button>
+
         </form>
+
     </div>
 
     {% if rapport %}
-        <h2>
+
+        {% if rapport.succursale %}
+
+            <h2>
+                Rapport :
+                {{ rapport.succursale.nom }}
+                ({{ rapport.succursale.code }})
+            </h2>
+
+        {% else %}
+
+            <h2>Rapport global du reseau</h2>
+
+        {% endif %}
+
+        <h3>
+
             Du {{ rapport.date_debut|date:"d/m/Y" }}
+
             au {{ rapport.date_fin|date:"d/m/Y" }}
-        </h2>
+
+        </h3>
 
         <div class="statistiques">
+
             <div class="carte">
+
                 <p>Cafes payants</p>
+
                 <h2>{{ rapport.cafes_payants }}</h2>
+
             </div>
 
             <div class="carte">
+
                 <p>Cafes gratuits</p>
+
                 <h2>{{ rapport.cafes_gratuits }}</h2>
+
             </div>
 
             <div class="carte">
+
                 <p>Cafes prepayes</p>
+
                 <h2>{{ rapport.cafes_prepayes }}</h2>
+
             </div>
 
             <div class="carte">
+
                 <p>Cartes vendues</p>
+
                 <h2>{{ rapport.cartes_vendues }}</h2>
+
             </div>
+
+            <div class="carte">
+
+                <p>Total des cafes servis</p>
+
+                <h2>{{ rapport.total_cafes }}</h2>
+
+            </div>
+
         </div>
+
     {% endif %}
+
 </main>
+
 </body>
 </html>

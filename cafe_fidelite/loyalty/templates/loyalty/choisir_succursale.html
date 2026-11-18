@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+
+<div class="container mt-5">
+
+    <div class="row justify-content-center">
+
+        <div class="col-md-6">
+
+            <div class="card shadow-sm">
+
+                <div class="card-header bg-dark text-white">
+                    <h4 class="mb-0">
+                        Choisir votre succursale
+                    </h4>
+                </div>
+
+                <div class="card-body">
+
+                    <p class="text-muted">
+                        Sélectionnez le café dans lequel
+                        vous souhaitez travailler.
+                    </p>
+
+                    <form method="post">
+
+                        {% csrf_token %}
+
+                        {% for succursale in succursales %}
+
+                        <div class="form-check border rounded p-3 mb-3">
+
+                            <input
+                                class="form-check-input ms-0 me-3"
+                                type="radio"
+                                name="succursale_id"
+                                value="{{ succursale.pk }}"
+                                id="cafe{{ succursale.pk }}"
+                                {% if succursale.pk == succursale_active_id %}
+                                    checked
+                                {% endif %}
+                                required
+                            >
+
+                            <label
+                                class="form-check-label"
+                                for="cafe{{ succursale.pk }}"
+                            >
+
+                                <strong>
+                                    {{ succursale.nom }}
+                                </strong>
+
+                                <br>
+
+                                <small class="text-muted">
+                                    {{ succursale.code }}
+                                    — {{ succursale.adresse }}
+                                </small>
+
+                            </label>
+
+                        </div>
+
+                        {% endfor %}
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary w-100"
+                        >
+                            Confirmer la succursale
+                        </button>
+
+                    </form>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

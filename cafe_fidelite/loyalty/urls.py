@@ -41,4 +41,9 @@ path(
     views.annuler_transaction,
     name="annuler_transaction",
 ),
+path(
+    "succursales/choisir/",
+    views.choisir_succursale,
+    name="choisir_succursale",
+),
 ]

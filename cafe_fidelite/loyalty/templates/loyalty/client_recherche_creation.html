@@ -1,6 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
+
+<div class="alert alert-info">
+
+    <strong>Succursale active :</strong>
+
+    {{ request.succursale.nom }}
+
+    ({{ request.succursale.code }})
+
+    <a
+        href="{% url 'loyalty:choisir_succursale' %}"
+        class="btn btn-sm btn-outline-primary ms-3"
+    >
+        Changer de succursale
+    </a>
+
+</div>
   <div class="container mt-4">
     <h1>Gestion des clients</h1>
     {% if messages %}
