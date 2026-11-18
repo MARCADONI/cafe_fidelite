@@ -1,781 +1,375 @@
-# Cafe Fidelite
+# ☕ Café Fidélité — Version 3
 
-Systeme de fidelite pour un cafe permettant de gerer les clients, les achats, les recompenses et les cartes prepayees.
+## Présentation
 
-[![Built with Cookiecutter Django](https://img.shields.io/badge/built%20with-Cookiecutter%20Django-ff69b4.svg?logo=cookiecutter)](https://github.com/cookiecutter/cookiecutter-django/)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+Café Fidélité est une application web de gestion des programmes de fidélité destinée à un réseau de cafés.
 
-## Settings
+Ce projet est réalisé dans le cadre du cours **8INF228 — Adaptation et qualité des applications**, à l'Université du Québec à Chicoutimi (UQAC).
 
-Moved to [settings](https://cookiecutter-django.readthedocs.io/en/latest/1-getting-started/settings.html).
+La version 3 introduit la gestion multisite, le partage des soldes entre succursales et une architecture conteneurisée utilisant PostgreSQL.
 
-## Basic Commands
+## Fonctionnalités
 
-### Setting Up Your Users
+### Gestion des clients
 
-- To create a **normal user account**, just go to Sign Up and fill out the form. Once you submit it, you'll see a "Verify Your E-mail Address" page. Go to your console to see a simulated email verification message. Copy the link into your browser. Now the user's email should be verified and ready to go.
+- Création et recherche des clients.
+- Consultation des soldes de fidélité.
+- Consultation des cartes prépayées.
+- Fusion des fiches clients.
+- Anonymisation des renseignements personnels.
 
-- To create a **superuser account**, use this command:
+### Programme de fidélité
 
-      uv run python manage.py createsuperuser
+- Accumulation des étampes lors des achats payants.
+- Attribution de récompenses selon une règle configurable.
+- Utilisation des récompenses dans toutes les succursales.
+- Conservation de l'historique des mouvements.
+- Gestion des annulations.
 
-For convenience, you can keep your normal user logged in on Chrome and your superuser logged in on Firefox (or similar), so that you can see how the site behaves for both kinds of users.
+### Cartes prépayées
 
-### Type checks
+- Émission de cartes de 11 cafés.
+- Utilisation des cartes dans toutes les succursales.
+- Consultation du nombre de cafés restants.
+- Annulation des ventes et des consommations.
 
-Running type checks with mypy:
+### Gestion multisite
 
-    uv run mypy cafe_fidelite
+- Création de nouvelles succursales sans modification du code.
+- Affectation des employés aux succursales.
+- Sélection de la succursale active.
+- Partage des clients, des récompenses et des cartes prépayées.
+- Identification de la succursale de chaque transaction.
 
-### Test coverage
+### Rapports et administration
 
-To run the tests, check your test coverage, and generate an HTML coverage report:
+- Rapports statistiques par période.
+- Rapports par succursale.
+- Rapports globaux du réseau.
+- Journal d'audit.
+- Configuration des règles de fidélité.
+- Gestion des permissions.
 
-    uv run coverage run -m pytest
-    uv run coverage html
-    uv run open htmlcov/index.html
+## Technologies utilisées
 
-#### Running tests with pytest
+| Technologie | Utilisation |
+|---|---|
+| Python 3.13 | Langage de programmation |
+| Django | Framework web |
+| PostgreSQL 17 | Base de données de production |
+| SQLite | Base de données de développement |
+| Bootstrap 5 | Interface utilisateur |
+| Django Crispy Forms | Gestion des formulaires |
+| Docker Compose | Orchestration des conteneurs |
+| Gunicorn | Serveur applicatif |
+| Nginx | Proxy inverse |
+| WhiteNoise | Gestion des fichiers statiques |
+| Git et GitHub | Gestion des versions |
 
-    uv run pytest
+## Architecture
 
-### Live reloading and Sass CSS compilation
+L'application sépare les responsabilités entre les modèles, les services métier, les vues et les interfaces utilisateurs.
 
-Moved to [Live reloading and SASS compilation](https://cookiecutter-django.readthedocs.io/en/latest/2-local-development/developing-locally.html#using-webpack-or-gulp).
+```mermaid
+flowchart LR
+    U[Navigateur] --> N[Nginx]
+    N --> A[Django / Gunicorn]
+    A --> P[(PostgreSQL)]
+    P --> V[(Volume persistant)]
+```
 
-## Deployment
+Seul Nginx est accessible depuis l'ordinateur hôte, sur le port 8000.
 
-The following details how to deploy this application.
+Les conteneurs Django et PostgreSQL communiquent par les réseaux Docker.
 
-**********************************************************************************************
-# Café Fidélité — Devoir 1
+## Installation en production locale
 
-Projet réalisé dans le cadre du cours **8INF228 — Adaptation et qualité des applications** à l'Université du Québec à Chicoutimi (UQAC).
+### Prérequis
+
+- Git.
+- Docker.
+- Docker Compose V2.
+- Python 3 pour la génération des secrets.
+
+Les commandes doivent être exécutées dans le répertoire contenant `manage.py` et `docker-compose.yml`.
+
+### 1. Configuration
+
+Sous Linux ou macOS :
+
+```bash
+cp .env.example .env
+```
+
+Sous Windows PowerShell :
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Cette opération doit uniquement être effectuée lors d'une nouvelle installation.
+
+Générer les secrets de l'application :
+
+```bash
+python -c "import secrets; from pathlib import Path; p=Path('.env'); s=p.read_text(); s=s.replace('DJANGO_SECRET_KEY=CHANGE_ME', 'DJANGO_SECRET_KEY='+secrets.token_urlsafe(64)); s=s.replace('CHANGE_ME', secrets.token_hex(24)); p.write_text(s, encoding='utf-8')"
+```
+
+Ne pas régénérer ces secrets après l'initialisation de PostgreSQL sans mettre à jour les identifiants de la base existante.
+
+Le fichier `.env` contient des informations sensibles et ne doit jamais être ajouté au dépôt Git.
+
+### 2. Démarrage
+
+```bash
+docker compose up --build -d
+```
+
+Les migrations Django sont appliquées automatiquement au démarrage du conteneur applicatif.
+
+### 3. Vérification
+
+```bash
+docker compose ps
+```
+
+Les trois services doivent être opérationnels :
+
+- db
+- app
+- nginx
+
+Application :
+
+http://localhost:8000
+
+Administration :
+
+http://localhost:8000/admin/
+
+Vérification de santé :
+
+http://localhost:8000/health/
+
+### 4. Données de démonstration
+
+Pour une installation neuve destinée à la démonstration :
+
+```bash
+docker compose exec app python manage.py seed_demo_v3
+```
+
+Cette commande est destinée aux environnements de démonstration et ne doit pas être exécutée sur une base de production réelle.
+
+Les données de démonstration comprennent deux succursales :
+
+| Code | Établissement |
+|---|---|
+| CAFE01 | Café principal |
+| CAFE02 | Café secondaire |
+
+### Comptes de démonstration
+
+| Rôle | Identifiant | Mot de passe | Succursale |
+|---|---|---|---|
+| Barista | `barista_demo` | `BaristaDemo2026!` | CAFE01 et CAFE02 |
+| Gérant 1 | `gerant_demo` | `GerantDemo2026!` | CAFE01 |
+| Gérant 2 | `gerant2_demo` | `Gerant2Demo2026!` | CAFE02 |
+| Propriétaire | `proprietaire_demo` | `ProprietaireDemo2026!` | Ensemble du réseau |
+
+Ces comptes sont exclusivement destinés à la démonstration de l'application.
+
+Les identifiants et mots de passe définitifs doivent correspondre à ceux définis dans la commande `seed_demo_v3`.
+
+### Clients de démonstration
+
+| Client | Téléphone | Scénario |
+|---|---|---|
+| Alice Demo V3 | 4185550101 | Accumulation d'étampes dans les deux cafés et utilisation d'une récompense au café secondaire |
+| Jean Demo V3 | 4185550102 | Achat d'une carte prépayée au café principal et consommation de trois cafés au café secondaire |
+| Sophie Demo V3 | 4185550103 | Trois achats payants répartis entre les deux succursales |
+
+Les transactions sont réparties sur plusieurs jours afin de permettre la démonstration des rapports statistiques par période et par succursale.
+
+### 5. Administration technique
+
+Pour créer un superutilisateur Django :
+
+```bash
+docker compose exec app python manage.py createsuperuser
+```
+
+Le superutilisateur est un compte d'administration technique distinct du rôle métier Propriétaire.
+
+## Rôles et permissions
+
+| Fonctionnalité | Barista | Gérant | Propriétaire |
+|---|---|---|---|
+| Enregistrer un achat | Oui | Oui | Oui |
+| Utiliser une récompense | Oui | Oui | Oui |
+| Émettre une carte | Oui | Oui | Oui |
+| Annuler une transaction | Non | Sa succursale | Toutes |
+| Consulter les rapports | Non | Sa succursale | Toutes |
+| Fusionner les clients | Non | Non | Oui |
+| Anonymiser les clients | Non | Non | Oui |
+| Configurer la fidélité | Non | Non | Oui |
+| Gérer les succursales | Non | Non | Oui |
+
+Les permissions sont vérifiées côté serveur.
+
+Les restrictions ne reposent pas uniquement sur les éléments visibles dans l'interface.
+
+## Scénario de démonstration multisite
+
+1. Se connecter avec le compte barista.
+2. Sélectionner CAFE01.
+3. Rechercher ou créer un client.
+4. Enregistrer des achats payants.
+5. Sélectionner CAFE02.
+6. Retrouver le même client.
+7. Utiliser une récompense disponible.
+8. Émettre une carte prépayée dans une succursale.
+9. Consommer un café prépayé dans l'autre succursale.
+10. Vérifier les soldes globaux du client.
+11. Se connecter avec le compte gérant et consulter les rapports locaux.
+12. Se connecter avec le compte propriétaire et consulter les rapports du réseau.
+
+## Tests automatisés
+
+Les tests de l'application peuvent être exécutés contre PostgreSQL avec la commande :
+
+```bash
+docker compose exec app python manage.py test cafe_fidelite.loyalty.tests --verbosity=2
+```
+
+Les tests couvrent notamment :
+
+- Les règles de fidélité.
+- Les cartes prépayées.
+- Les annulations.
+- Les rapports statistiques.
+- La fusion des clients.
+- L'anonymisation.
+- Les permissions.
+- Les transactions multisites.
+- Les restrictions d'accès entre succursales.
+
+La suite de 94 tests a réussi lors d'une validation intermédiaire sous SQLite. Une nouvelle exécution est nécessaire pour confirmer les résultats après les dernières migrations et sous PostgreSQL.
+
+## Consultation des soldes
+
+Pour consulter les soldes des clients :
+
+```bash
+docker compose exec app python manage.py balances
+```
+
+Cette commande permet de vérifier les étampes, les récompenses disponibles et les cafés restants sur les cartes prépayées.
+
+Les soldes sont globaux à l'échelle du réseau.
+
+Pour consulter les options disponibles :
+
+```bash
+docker compose exec app python manage.py balances --help
+```
+
+## Migration depuis la version 2
+
+La version 3 conserve les migrations des versions précédentes.
+
+Les données historiques sont associées à la première succursale, CAFE01.
+
+La procédure de migration comprend :
+
+1. La sauvegarde de la base SQLite V2.
+2. La consultation des soldes avant migration.
+3. L'application des migrations Django V3 sur une copie.
+4. L'exportation des données.
+5. L'importation dans PostgreSQL.
+6. La comparaison des soldes avant et après migration.
+7. La vérification des transactions historiques.
+
+Consulter le document [Migration des données](docs/migration.md).
+
+Ne pas charger les données de démonstration V3 avant d'avoir terminé la vérification des données historiques.
+
+## Mode développement
+
+Le mode développement utilise SQLite et une configuration distincte de la production.
+
+### Installation des dépendances
+
+```bash
+uv sync
+```
+
+### Application des migrations
+
+```bash
+uv run python manage.py migrate --settings=config.settings.local
+```
+
+### Démarrage du serveur
+
+```bash
+uv run python manage.py runserver --settings=config.settings.local
+```
+
+L'application est accessible à l'adresse :
+
+http://127.0.0.1:8000
+
+### Tests en développement
+
+```bash
+uv run python manage.py test cafe_fidelite.loyalty.tests --settings=config.settings.local
+```
+
+Le serveur de développement ne doit pas être utilisé en production.
+
+## Commandes Docker utiles
+
+| Commande | Description |
+|---|---|
+| docker compose up --build -d | Construire et démarrer |
+| docker compose ps | Vérifier les conteneurs |
+| docker compose logs -f app | Consulter les journaux Django |
+| docker compose logs -f db | Consulter les journaux PostgreSQL |
+| docker compose stop | Arrêter les services |
+| docker compose down | Supprimer les conteneurs et réseaux |
+| docker compose up -d | Redémarrer les services |
+
+Les données PostgreSQL sont conservées dans le volume nommé `postgres_data`.
+
+Ne jamais utiliser `docker compose down -v` lorsqu'il faut conserver les données.
+
+## Documentation
+
+- [Document de conception](docs/conception.md)
+- [Rétrospective de la V2](docs/retrospective-v2.md)
+- [Procédure de migration](docs/migration.md)
+- [Décisions architecturales — ADR](docs/adr/)
+- [Déclaration d'utilisation de l'IA](AI-USAGE.md)
+
+## Limites
+
+L'application ne traite aucun paiement et ne fournit pas d'espace client.
+
+Le déploiement est local et repose sur une seule instance applicative.
+
+Le déploiement cloud, la réplication, l'équilibrage de charge et la configuration HTTPS publique ne font pas partie de cette version.
+
+## État de validation
+
+La validation finale du déploiement PostgreSQL et de la migration V2 vers V3 reste à compléter.
 
 ## Auteurs
 
-* ADONI KOUADIO AMBOF MARC CHRISTIAN ADOK25040100
-* KADIATOU LAMARANA BAH BAHK30629900
+Projet réalisé dans le cadre du cours 8INF228 — Adaptation et qualité des applications.
 
----
+Université du Québec à Chicoutimi.
 
-# 1. Description du projet
+## Version
 
-**Café Fidélité** est une application Web Django fonctionnant localement et permettant de gérer le programme de fidélité d'un café.
-
-L'application permet de :
-
-* créer un client ;
-* rechercher un client par numéro de téléphone ;
-* enregistrer un achat de café ;
-* suivre la progression de fidélité d'un client ;
-* obtenir une récompense après 10 achats payants ;
-* utiliser une récompense pour obtenir un café gratuit ;
-* émettre une carte prépayée de 11 cafés ;
-* utiliser les cafés d'une carte prépayée ;
-* conserver l'historique des achats ;
-* consulter et administrer les données avec Django Admin.
-
-L'application utilise **SQLite**. Aucun serveur de base de données externe n'est nécessaire.
-
----
-
-# 2. Prérequis
-
-Pour lancer le projet, il faut disposer de :
-
-* **Python 3.13**
-* **Git**
-* une connexion Internet lors de l'installation initiale des dépendances
-
-Le projet utilise **uv** pour installer et gérer les dépendances Python.
-
-Aucune installation de PostgreSQL, MySQL, Docker ou autre serveur de base de données n'est nécessaire.
-
----
-
-# 3. Récupération du projet
-
-Cloner le dépôt GitHub :
-
-```bash id="z5o0j8"
-git clone <URL_DU_DEPOT_GITHUB>
-```
-
-Se déplacer dans le dossier du projet :
-
-```bash id="k5w1zv"
-cd cafe_fidelite
-```
-
-Le dossier doit notamment contenir :
-
-```text id="ujz2w8"
-cafe_fidelite/
-├── cafe_fidelite/
-├── config/
-├── docs/
-├── manage.py
-├── pyproject.toml
-├── uv.lock
-├── README.md
-└── AI-USAGE.md
-```
-
-Toutes les commandes suivantes doivent être exécutées depuis ce dossier, c'est-à-dire le dossier contenant `manage.py`.
-
----
-
-# 4. Installation de uv
-
-Vérifier si `uv` est déjà installé :
-
-```bash id="92dthf"
-uv --version
-```
-
-Si une version est affichée, passer directement à la section suivante.
-
-Sinon, installer `uv` avec :
-
-```bash id="t7qxk5"
-python -m pip install uv
-```
-
-Si la commande `python` n'est pas disponible sous Windows, essayer :
-
-```bash id="4tbwh7"
-py -m pip install uv
-```
-
-Vérifier ensuite l'installation :
-
-```bash id="frd8po"
-uv --version
-```
-
----
-
-# 5. Installation des dépendances
-
-Depuis le dossier contenant `manage.py`, exécuter :
-
-```bash id="y1j1ps"
-uv sync
-```
-
-Cette commande crée l'environnement virtuel `.venv` et installe les dépendances définies par le projet.
-
----
-
-# 6. Vérification du projet
-
-Avant de créer la base de données, vérifier la configuration Django :
-
-```bash id="m2x8gq"
-uv run python manage.py check
-```
-
-Le résultat attendu est :
-
-```text id="xgk8z3"
-System check identified no issues (0 silenced).
-```
-
----
-
-# 7. Création de la base de données
-
-Le projet utilise **SQLite**.
-
-Il n'est donc pas nécessaire d'installer ou de configurer un serveur de base de données.
-
-Appliquer les migrations Django avec :
-
-```bash id="ohjpc2"
-uv run python manage.py migrate
-```
-
-Cette commande crée les tables nécessaires dans la base de données SQLite locale.
-
----
-
-# 8. Création d'un compte administrateur
-
-Pour accéder à Django Admin, créer un superutilisateur :
-
-```bash id="g4kn2c"
-uv run python manage.py createsuperuser
-```
-
-Django demandera notamment :
-
-```text id="vnm06n"
-Username:
-Email address:
-Password:
-Password (again):
-```
-
-Les identifiants choisis ici seront utilisés pour se connecter à l'interface d'administration.
-
-Cette étape est recommandée pour tester et consulter les données enregistrées dans l'application.
-
----
-
-# 9. Lancement de l'application
-
-Démarrer le serveur Django avec :
-
-```bash id="kncgh9"
-uv run python manage.py runserver
-```
-
-Si le démarrage fonctionne correctement, Django affiche une adresse similaire à :
-
-```text id="s8t4ue"
-Starting development server at http://127.0.0.1:8000/
-```
-
-Ouvrir ensuite un navigateur Web.
-
-## Interface principale
-
-Accéder à :
-
-```text id="70u4l3"
-http://127.0.0.1:8000/clients/
-```
-
-Cette page permet de rechercher ou de créer un client.
-
-## Interface d'administration
-
-Accéder à :
-
-```text id="1b8g48"
-http://127.0.0.1:8000/admin/
-```
-
-Utiliser le compte créé avec `createsuperuser`.
-
----
-
-# 10. Procédure rapide de lancement
-
-Pour un ordinateur sur lequel Python 3.13, Git et uv sont déjà installés, les commandes principales sont :
-
-```bash id="xpm49p"
-git clone <URL_DU_DEPOT_GITHUB>
-cd cafe_fidelite
-uv sync
-uv run python manage.py check
-uv run python manage.py migrate
-uv run python manage.py createsuperuser
-uv run python manage.py runserver
-```
-
-Puis ouvrir :
-
-```text id="rfwr43"
-http://127.0.0.1:8000/clients/
-```
-
----
-
-# 11. Utilisation de l'application
-
-## 11.1 Créer un client
-
-Accéder à :
-
-```text id="daz8y1"
-http://127.0.0.1:8000/clients/
-```
-
-Le formulaire de création permet de saisir :
-
-* le nom ;
-* le numéro de téléphone ;
-* le courriel.
-
-Le numéro de téléphone doit être unique.
-
----
-
-## 11.2 Rechercher un client
-
-Sur la même page, entrer le numéro de téléphone d'un client puis cliquer sur :
-
-```text id="fhucx3"
-Rechercher
-```
-
-Si le client existe, ses informations sont affichées.
-
-Un bouton permet ensuite d'accéder à sa page d'achat.
-
----
-
-## 11.3 Enregistrer un achat payant
-
-Sur la page du client, cliquer sur :
-
-```text id="1ggtr4"
-Enregistrer un achat payant
-```
-
-Chaque achat payant augmente la progression de fidélité de 1.
-
-Exemple :
-
-```text id="h6cqxc"
-0/10
- ↓
-1/10
- ↓
-2/10
- ↓
-...
- ↓
-9/10
- ↓
-10e achat
- ↓
-0/10 + 1 récompense
-```
-
-Après 10 achats payants, le client obtient une récompense disponible.
-
----
-
-## 11.4 Utiliser une récompense
-
-Lorsqu'un client possède au moins une récompense, le bouton :
-
-```text id="pry19v"
-Utiliser une récompense
-```
-
-apparaît.
-
-L'utilisation de cette récompense :
-
-* enregistre un achat de type `GRATUIT_FIDELITE` ;
-* diminue le nombre de récompenses de 1 ;
-* ne modifie pas la progression de fidélité.
-
----
-
-# 12. Cartes prépayées
-
-## 12.1 Émettre une carte
-
-Sur la page du client, cliquer sur :
-
-```text id="e72fx4"
-Émettre une carte de 11 cafés
-```
-
-Une nouvelle carte est créée avec :
-
-```text id="6y4hcg"
-Cafés restants : 11 / 11
-Statut : Active
-```
-
-L'application ne traite pas le paiement de la carte.
-
-La transaction financière est effectuée à la caisse, en dehors de l'application.
-
----
-
-## 12.2 Utiliser une carte
-
-Pour une carte active, cliquer sur :
-
-```text id="m65kkf"
-Utiliser un café de cette carte
-```
-
-Chaque utilisation diminue le nombre de cafés restants :
-
-```text id="uxw4gv"
-11 → 10 → 9 → 8 → ... → 2 → 1 → 0
-```
-
-Chaque utilisation est enregistrée comme un achat de type :
-
-```text id="t3yp7m"
-PREPAYE
-```
-
-L'utilisation d'une carte prépayée ne fait pas progresser le compteur de fidélité.
-
----
-
-## 12.3 Fin d'une carte
-
-Lorsque le nombre de cafés atteint zéro :
-
-```text id="a08gk8"
-Cafés restants : 0 / 11
-Statut : Terminée
-```
-
-La carte est automatiquement désactivée.
-
-Elle reste néanmoins enregistrée afin de conserver l'historique.
-
-Un client peut ensuite recevoir une nouvelle carte prépayée.
-
----
-
-# 13. Types d'achats
-
-Trois types d'achats sont enregistrés dans l'application :
-
-| Type               | Description                            | Effet                   |
-| ------------------ | -------------------------------------- | ----------------------- |
-| `PAYANT`           | Achat normal                           | Progression fidélité +1 |
-| `GRATUIT_FIDELITE` | Café obtenu avec une récompense        | Récompenses -1          |
-| `PREPAYE`          | Café utilisé depuis une carte prépayée | Cafés restants -1       |
-
----
-
-# 14. Django Admin
-
-L'administration est disponible à :
-
-```text id="e6tj4f"
-http://127.0.0.1:8000/admin/
-```
-
-Elle permet notamment de consulter :
-
-* les clients ;
-* les fidélités ;
-* les achats ;
-* les cartes prépayées.
-
-Elle peut être utilisée pour vérifier l'état de la base de données pendant l'évaluation.
-
----
-
-# 15. Technologies utilisées
-
-Le projet utilise principalement :
-
-* Python 3.13 ;
-* Django ;
-* SQLite ;
-* HTML ;
-* Bootstrap ;
-* Cookiecutter Django ;
-* uv ;
-* Git ;
-* GitHub.
-
----
-
-# 16. Structure de l'application
-
-La partie principale développée pour le devoir se trouve dans :
-
-```text id="kgns8g"
-cafe_fidelite/loyalty/
-```
-
-Organisation principale :
-
-```text id="ucbn37"
-cafe_fidelite/
-│
-├── cafe_fidelite/
-│   │
-│   ├── loyalty/
-│   │   ├── migrations/
-│   │   ├── templates/
-│   │   │   └── loyalty/
-│   │   │       ├── client_recherche_creation.html
-│   │   │       └── enregistrer_achat.html
-│   │   │
-│   │   ├── admin.py
-│   │   ├── apps.py
-│   │   ├── forms.py
-│   │   ├── models.py
-│   │   ├── services.py
-│   │   ├── urls.py
-│   │   └── views.py
-│   │
-│   └── users/
-│
-├── config/
-│   ├── settings/
-│   └── urls.py
-│
-├── docs/
-│   └── conception.md
-│
-├── AI-USAGE.md
-├── manage.py
-├── pyproject.toml
-├── uv.lock
-└── README.md
-```
-
----
-
-# 17. Architecture
-
-La logique métier a été séparée des vues Django.
-
-L'organisation générale est :
-
-```text id="rx77wz"
-Navigateur
-    |
-    v
-Templates HTML
-    |
-    v
-views.py
-    |
-    v
-services.py
-    |
-    v
-models.py
-    |
-    v
-SQLite
-```
-
-`views.py` gère principalement les requêtes et réponses HTTP.
-
-`services.py` contient les règles métier, notamment :
-
-* l'enregistrement d'un achat payant ;
-* l'utilisation d'une récompense ;
-* l'émission d'une carte prépayée ;
-* l'utilisation d'une carte prépayée.
-
-`models.py` définit les données persistées.
-
----
-
-# 18. Documentation de conception
-
-Les décisions architecturales, le diagramme entité-relation, le diagramme ASCII, les cardinalités et les principes de conception sont documentés dans :
-
-```text id="uykllz"
-docs/conception.md
-```
-
----
-
-# 19. Utilisation de l'intelligence artificielle
-
-L'utilisation de l'intelligence artificielle générative pendant le développement est déclarée dans :
-
-```text id="7a9bve"
-AI-USAGE.md
-```
-
----
-
-# 20. Arrêter le serveur
-
-Dans le terminal où Django est lancé, utiliser :
-
-```text id="vplimj"
-Ctrl + C
-```
-
-pour arrêter le serveur de développement.
-
----
-
-# 21. Résolution de problèmes
-
-## `uv` n'est pas reconnu
-
-Installer uv :
-
-```bash id="9uv0t5"
-python -m pip install uv
-```
-
-Puis fermer et rouvrir le terminal si nécessaire.
-
----
-
-## Python 3.13 n'est pas disponible
-
-Vérifier la version installée :
-
-```bash id="vvhsoj"
-python --version
-```
-
-Le projet a été développé et testé avec Python 3.13.
-
----
-
-## Les tables n'existent pas
-
-Exécuter :
-
-```bash id="t4qm0k"
-uv run python manage.py migrate
-```
-
----
-
-## Impossible d'accéder à Django Admin
-
-Créer d'abord un administrateur :
-
-```bash id="f3bscu"
-uv run python manage.py createsuperuser
-```
-
-Puis relancer le serveur :
-
-```bash id="r6bmfh"
-uv run python manage.py runserver
-```
-
-et accéder à :
-
-```text id="ah1m5v"
-http://127.0.0.1:8000/admin/
-```
-
----
-
-## Vérifier la configuration Django
-
-En cas de problème, exécuter :
-
-```bash id="b3xfh7"
-uv run python manage.py check
-```
-
-Le résultat attendu est :
-
-```text id="md3xsv"
-System check identified no issues (0 silenced).
-```
-
----
-
-# 22. Version
-
-Ce dépôt correspond au **Devoir 1 — Système de fidélité pour un café, version 1** du cours **8INF228 — Adaptation et qualité des applications**.
-
-
-# Devoir 2 — Évolution et qualité de Café Fidélité
-
-## 23. Présentation du Devoir 2
-
-Le Devoir 2 du cours **8INF228 — Adaptation et qualité des applications** consiste à faire évoluer l'application Café Fidélité en intégrant de nouvelles fonctionnalités métier, des mécanismes de contrôle et des améliorations de qualité logicielle.
-
-L'évolution du système repose sur l'architecture Django existante, notamment la séparation entre les modèles, les services métier, les vues et les interfaces HTML.
-
-## 24. Fonctionnalités ajoutées
-
-### 24.1 Gestion des annulations
-
-Le système prend en charge l'annulation de certaines opérations :
-
-- Achat payant.
-- Utilisation d'une récompense de fidélité.
-- Utilisation d'une carte prépayée.
-- Vente d'une carte prépayée.
-
-Les services métier appliquent les règles nécessaires pour gérer les conséquences de ces annulations.
-
-### 24.2 Gestion avancée des clients
-
-Deux opérations administratives ont été ajoutées :
-
-**Fusion des clients :** regrouper les données de deux comptes clients selon les règles métier.
-
-**Anonymisation :** protéger les données personnelles d'un client en anonymisant son compte.
-
-Les comptes fusionnés ou anonymisés ne peuvent plus effectuer les opérations métier interdites par leur état.
-
-### 24.3 Gestion des règles de fidélité
-
-Le système permet de programmer des modifications des règles de fidélité.
-
-Les informations liées aux règles appliquées sont conservées afin d'améliorer la traçabilité des opérations.
-
-### 24.4 Rapports statistiques
-
-Une interface de rapports permet aux utilisateurs autorisés de consulter des informations de gestion.
-
-Adresse : `/clients/rapports/`
-
-### 24.5 Contrôle d'accès
-
-Certaines fonctionnalités administratives sont réservées aux utilisateurs appartenant au groupe Django `Gerant`.
-
-Les interfaces protégées nécessitent une authentification et vérifient les autorisations.
-
-Un utilisateur non autorisé reçoit une réponse HTTP 403.
-
-### 24.6 Journal d'audit
-
-Le modèle `JournalAudit` conserve des informations sur les opérations sensibles.
-
-Il enregistre notamment :
-
-- L'utilisateur responsable.
-- Le type d'opération.
-- L'objet concerné, lorsqu'il est identifié.
-- Une description.
-- La date de l'opération.
-
-Le journal est accessible aux utilisateurs autorisés à l'adresse `/clients/audit/`.
-
-## 25. Tests automatisés
-
-L'application possède une suite de tests Django couvrant les comportements métier, les contrôles d'accès et les mécanismes de traçabilité.
-
-Pour exécuter les tests :
-
-```powershell
-.\.venv\Scripts\python.exe manage.py test cafe_fidelite.loyalty
-```
-
-Le résultat final doit être vérifié avant la remise du projet.
-
-## 26. Documentation complémentaire
-
-Les documents du projet sont organisés dans le répertoire `docs/` :
-
-- `Conception.md` : conception et architecture.
-- `migration.md` : évolution du modèle de données.
-- Document de rétrospective : difficultés, décisions et améliorations.
-- `ADR/` : décisions d'architecture.
-- `AI-USAGE.md` : déclaration de l'utilisation de l'intelligence artificielle, à la racine du projet.
-
-## 27. Exécution locale
-
-Depuis le dossier contenant `manage.py` :
-
-```powershell
-.\.venv\Scripts\python.exe manage.py check
-.\.venv\Scripts\python.exe manage.py migrate
-.\.venv\Scripts\python.exe manage.py runserver
-```
-
-L'application est ensuite accessible sur :
-
-http://127.0.0.1:8000/
-
-L'administration Django est accessible sur :
-
-http://127.0.0.1:8000/admin/
+Café Fidélité — V3.
