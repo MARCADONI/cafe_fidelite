@@ -1,113 +1,371 @@
-# Migration de Café Fidélité — v1 vers v2
+# Migration de Café Fidélité V2 vers V3
 
-## Objectif
+## 1. Objectif
 
-Mettre à jour une base de données existante de la version 1 vers la version 2 sans perdre les clients, les achats, les étampes, les récompenses ni les soldes des cartes prépayées.
+Cette procédure permet de migrer une installation existante de Café Fidélité V2 utilisant SQLite vers la version V3 utilisant PostgreSQL dans des conteneurs Docker.
 
-## Stratégie
+La migration doit garantir :
 
-- Conserver toutes les migrations de la v1.
-- Ajouter de nouvelles migrations Django.
-- Conserver les soldes existants sans les recalculer.
-- Initialiser une règle historique de fidélité à 10 étampes.
-- Reconstituer une émission pour chaque carte prépayée existante.
-- Laisser l'employé responsable vide lorsque l'information n'existait pas dans la v1.
+- La conservation des clients existants.
+- La conservation des étampes, récompenses et dettes d'étampes.
+- La conservation des cartes prépayées et de leurs soldes.
+- La conservation des transactions, annulations et journaux d'audit.
+- La conservation des comptes utilisateurs.
+- L'attribution des transactions historiques à la première succursale.
 
-## Vérification
+## 2. Stratégie de migration
 
-Avant migration :
+La migration est réalisée en deux étapes distinctes :
 
-`python manage.py balances`
+1. Migration du schéma SQLite de la V2 vers la V3.
+2. Transfert des données SQLite vers PostgreSQL.
 
-Après migration :
+Cette approche permet de séparer les modifications du modèle de données du changement de moteur de base de données.
 
-`python manage.py balances`
+Les migrations Django précédemment livrées sont conservées.
 
-Les résultats doivent être comparés pour chaque client et chaque carte.
-
-## Résultats réels
-
-À compléter après exécution des migrations :
-
-- Version et tag v1 utilisés :
-- Nombre de clients avant :
-- Nombre de clients après :
-- Nombre d'achats avant :
-- Nombre d'achats après :
-- Nombre de cartes avant :
-- Nombre de cartes après :
-- Nombre d'émissions reconstruites :
-- Soldes identiques : oui / non
-- Problèmes rencontrés :
-- Corrections apportées :
-
-## Historique des migrations Django
-
-L'évolution de Café Fidélité repose sur les migrations Django de l'application `loyalty`.
-
-Les migrations initiales de la version 1 ont été conservées. Les évolutions successives ont permis d'intégrer les nouvelles fonctionnalités de la version 2.
-
-### Migrations appliquées
+### Nouvelles migrations
 
 | Migration | Description |
 |---|---|
-| `0001_initial` | Création des structures initiales |
-| `0002_fidelite` | Introduction du modèle de fidélité |
-| `0003_carteprepayee` | Introduction des cartes prépayées |
-| `0004_achat` | Introduction de l'historique des achats |
-| `0005_client_date_anonymisation_client_est_anonymise_and_more` | Évolution des données des clients et autres modèles |
-| `0006_achat_employe_achat_seuil_fidelite_applique_and_more` | Évolution du suivi des achats et de leurs règles |
-| `0007_initialiser_donnees_v2` | Initialisation des données nécessaires à la version 2 |
-| `0008_achat_dette_remboursee_achat_etampes_ajoutees_and_more` | Ajout d'informations nécessaires au suivi des effets des achats |
-| `0009_achat_effets_traces` | Évolution de la traçabilité des effets des achats |
-| `0010_mouvementfidelite` | Introduction de l'historique des mouvements de fidélité |
-| `0011_journalaudit` | Introduction du journal d'audit |
+| 0012 | Création du modèle Succursale |
+| 0013 | Création du modèle AffectationSuccursale |
+| 0014 | Ajout des succursales aux transactions |
+| 0015 | Attribution des données historiques à CAFE01 |
+| 0016 | Rendre obligatoire la succursale des transactions |
 
-Ces onze migrations ont été signalées comme appliquées lors de la dernière vérification de l'environnement local.
+La première succursale est identifiée par le code `CAFE01`.
 
-### Vérification de l'état des migrations
+## 3. Prérequis
 
-La commande suivante permet d'afficher les migrations :
+- Python 3.13.
+- Environnement virtuel contenant les dépendances Django.
+- Docker et Docker Compose.
+- Une base SQLite fonctionnelle provenant de la V2.
+- Le code source de la V3.
+- Un fichier `.env` correctement configuré.
 
-```powershell
-.\.venv\Scripts\python.exe manage.py showmigrations loyalty
-```
+Les commandes suivantes sont présentées pour PowerShell.
 
-Une migration précédée de `[X]` est considérée comme appliquée dans la base de données utilisée par Django.
+## 4. Sauvegarde de la version V2
 
-Pour vérifier que les modèles ne nécessitent pas de nouvelles migrations :
+Avant de commencer, arrêter le serveur Django V2 et toute opération susceptible de modifier la base.
 
-```powershell
-.\.venv\Scripts\python.exe manage.py makemigrations --check --dry-run
-```
-
-Pour vérifier l'absence de migrations en attente :
+Depuis la version V2, créer un répertoire de sauvegarde en dehors du dépôt :
 
 ```powershell
-.\.venv\Scripts\python.exe manage.py migrate --check
+New-Item -ItemType Directory -Force ..\backup_v2
 ```
 
-### Conservation des données historiques
+Sauvegarder la base SQLite :
 
-La stratégie de migration vise à préserver les données de la version 1, notamment :
+```powershell
+Copy-Item db.sqlite3 ..\backup_v2\db_v2.sqlite3
+```
 
-- Les fiches clients.
-- L'historique des achats.
-- Les compteurs de progression et les récompenses.
-- Les soldes des cartes prépayées.
+Enregistrer les soldes avant migration :
 
-La validation effective de cette conservation nécessite une comparaison des données avant et après migration.
+```powershell
+python manage.py balances --settings=config.settings.local |
+    Set-Content -Encoding utf8 ..\backup_v2\balances_avant.txt
+```
 
-Les résultats chiffrés doivent être consignés dans la section « Résultats réels » du présent document.
+Vérifier l'intégrité de la sauvegarde :
 
-### Précautions et retour arrière
+```powershell
+python -c "import sqlite3; c=sqlite3.connect('file:../backup_v2/db_v2.sqlite3?mode=ro', uri=True); print(c.execute('PRAGMA integrity_check').fetchall()); c.close()"
+```
 
-Avant une migration sur une base contenant des données importantes, une sauvegarde doit être effectuée.
+Le résultat attendu est :
 
-Les migrations qui transforment ou anonymisent des données peuvent nécessiter des procédures particulières de restauration.
+```text
+[('ok',)]
+```
 
-La réversibilité d'une migration doit être vérifiée avant toute tentative de retour arrière.
+La sauvegarde originale ne doit jamais être modifiée.
 
-## Conclusion
+## 5. Préparation de la version V3
 
-La migration sera considérée comme validée lorsque les données et les soldes de la v1 seront conservés et que les nouveaux modèles de la v2 seront opérationnels.   
+Récupérer la version V3 du projet après avoir sauvegardé la base V2.
+
+Installer les dépendances conformément au README.
+
+Créer un répertoire de travail :
+
+```powershell
+New-Item -ItemType Directory -Force migration_data
+```
+
+Créer une copie de la sauvegarde :
+
+```powershell
+Copy-Item ..\backup_v2\db_v2.sqlite3 migration_data\db_migration.sqlite3
+```
+
+Le répertoire `migration_data/` doit être exclu de Git et de l'image Docker.
+
+## 6. Configuration SQLite temporaire
+
+Utiliser le fichier `config/settings/migration.py` :
+
+```python
+from .local import *
+from .base import BASE_DIR
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "migration_data" / "db_migration.sqlite3",
+        "ATOMIC_REQUESTS": True,
+    }
+}
+```
+
+Cette configuration permet de travailler sur une copie indépendante de la base V2.
+
+Vérifier le chemin utilisé :
+
+```powershell
+python manage.py shell --settings=config.settings.migration -c "from django.db import connection; print(connection.settings_dict['NAME'])"
+```
+
+## 7. Migration du schéma SQLite
+
+Appliquer les migrations Django :
+
+```powershell
+python manage.py migrate --settings=config.settings.migration
+```
+
+Vérifier les soldes :
+
+```powershell
+python manage.py balances --settings=config.settings.migration
+```
+
+Vérifier la succursale historique :
+
+```powershell
+python manage.py balances --succursale CAFE01 --settings=config.settings.migration
+```
+
+Vérifier l'attribution des transactions :
+
+```powershell
+python manage.py shell --settings=config.settings.migration -c "from cafe_fidelite.loyalty.models import Achat, EmissionCarte, Annulation; print({m.__name__: m.objects.exclude(succursale__code='CAFE01').count() for m in (Achat, EmissionCarte, Annulation)})"
+```
+
+Pour une base provenant exclusivement de la V2, les trois compteurs doivent être égaux à zéro.
+
+## 8. Exportation des données
+
+Exporter les données de la base SQLite migrée :
+
+```powershell
+python manage.py dumpdata --settings=config.settings.migration --all --natural-foreign --exclude contenttypes --exclude auth.permission --exclude sessions --indent 2 --output migration_data/donnees_v3.json
+```
+
+Les permissions et les types de contenu sont régénérés par les migrations Django.
+
+Les sessions existantes ne sont pas transférées. Les utilisateurs devront se reconnecter.
+
+Le fichier JSON contient des données potentiellement sensibles et ne doit pas être ajouté au dépôt Git.
+
+## 9. Préparation de PostgreSQL
+
+Configurer le fichier `.env` conformément au README.
+
+Construire les images et démarrer PostgreSQL :
+
+```powershell
+docker compose build app
+docker compose up -d db
+```
+
+Créer une base PostgreSQL indépendante pour la migration :
+
+```powershell
+docker compose exec db sh -c 'createdb -U "$POSTGRES_USER" cafe_fidelite_validation'
+```
+
+Cette base doit être nouvelle. Si elle existe déjà, vérifier son contenu avant de poursuivre.
+
+Configurer temporairement `DATABASE_URL` dans `.env` pour utiliser `cafe_fidelite_validation`, en conservant les véritables identifiants PostgreSQL.
+
+Appliquer les migrations :
+
+```powershell
+docker compose run --rm --no-deps --entrypoint python app manage.py migrate --noinput
+```
+
+Vérifier la connexion :
+
+```powershell
+docker compose run --rm --no-deps --entrypoint python app manage.py shell -c "from django.db import connection; connection.ensure_connection(); print(connection.vendor); print(connection.settings_dict['NAME'])"
+```
+
+Résultat attendu :
+
+```text
+postgresql
+cafe_fidelite_validation
+```
+
+## 10. Importation des données
+
+Ne pas initialiser les données de démonstration V3 avant l'importation.
+
+Vérifier que la base de destination est bien la base de validation et qu'elle ne contient aucune donnée métier à conserver.
+
+Les migrations initialisent certaines données de référence. Pour éviter les conflits avec les identifiants de la base source, vider uniquement la base de validation :
+
+```powershell
+docker compose run --rm --no-deps --entrypoint python app manage.py flush --noinput
+```
+
+Importer ensuite les données :
+
+```powershell
+docker compose run --rm --no-deps -v "${PWD}/migration_data:/migration_data:ro" --entrypoint python app manage.py loaddata /migration_data/donnees_v3.json
+```
+
+En cas d'erreur, arrêter la procédure et identifier la cause avant toute nouvelle tentative.
+
+## 11. Vérification des soldes PostgreSQL
+
+Démarrer les conteneurs :
+
+```powershell
+docker compose up -d --force-recreate app nginx
+```
+
+Afficher les soldes du réseau :
+
+```powershell
+docker compose exec app python manage.py balances
+```
+
+Afficher les soldes du premier café :
+
+```powershell
+docker compose exec app python manage.py balances --succursale CAFE01
+```
+
+Enregistrer les résultats :
+
+```powershell
+docker compose exec -T app python manage.py balances |
+    Set-Content -Encoding utf8 migration_data/balances_apres.txt
+```
+
+Comparer les valeurs obtenues avec les soldes enregistrés avant la migration.
+
+Vérifier également les transactions historiques :
+
+```powershell
+docker compose exec app python manage.py shell -c "from cafe_fidelite.loyalty.models import Achat, EmissionCarte, Annulation; print({m.__name__: m.objects.exclude(succursale__code='CAFE01').count() for m in (Achat, EmissionCarte, Annulation)})"
+```
+
+## 12. Résultats de notre vérification
+
+### Soldes de fidélité
+
+| Client | Étampes V2 | Étampes V3 SQLite | Récompenses V2 | Récompenses V3 SQLite |
+|---|---:|---:|---:|---:|
+| Client Test | 0 | 0 | 0 | 0 |
+| Jean Tremblay | 1 | 1 | 0 | 0 |
+| Marc Adoni | 1 | 1 | 1 | 1 |
+
+### Cartes prépayées
+
+| Carte | Cafés restants V2 | Cafés restants V3 SQLite | État V3 SQLite |
+|---|---:|---:|---|
+| Carte 1 | 11 | 11 | Active |
+| Carte 2 | 0 | 0 | Inactive |
+| Carte 3 | 7 | 7 | Active |
+| Carte 4 | 9 | 9 | Active |
+
+Les soldes historiques observés sous SQLite V3 sont identiques aux soldes V2 enregistrés avant migration.
+
+### Validation PostgreSQL
+
+| Vérification | Résultat |
+|---|---|
+| Conservation des clients | À valider |
+| Conservation des étampes | À valider |
+| Conservation des récompenses | À valider |
+| Conservation des cartes | À valider |
+| Attribution des transactions à CAFE01 | À valider |
+| Persistance après redémarrage | À valider |
+| Tests automatisés PostgreSQL | À valider |
+
+Cette section sera complétée avec les résultats réels après résolution du problème de connexion PostgreSQL.
+
+## 13. Tests automatisés
+
+La validation SQLite de la V3 a été effectuée le 18 novembre 2026.
+
+```text
+Ran 94 tests in 7.968s
+
+OK
+```
+
+Pour exécuter les tests sous PostgreSQL :
+
+```powershell
+docker compose exec app python manage.py test cafe_fidelite.loyalty.tests --verbosity=2
+```
+
+La réussite des tests SQLite ne dispense pas de la validation sous PostgreSQL.
+
+## 14. Vérification de la persistance
+
+Après validation de l'importation :
+
+```powershell
+docker compose down
+docker compose up -d
+docker compose ps
+```
+
+Afficher de nouveau les soldes :
+
+```powershell
+docker compose exec app python manage.py balances
+```
+
+Les résultats doivent être identiques à ceux obtenus avant le redémarrage.
+
+Ne jamais utiliser `docker compose down -v` sur une installation contenant des données à conserver.
+
+## 15. Retour arrière
+
+En cas d'échec de la migration :
+
+1. Arrêter l'application V3.
+2. Conserver la base PostgreSQL pour analyser les erreurs.
+3. Restaurer le code de la version V2.
+4. Restaurer une copie de la sauvegarde SQLite originale.
+5. Redémarrer l'application V2.
+6. Vérifier les soldes avec la commande `balances`.
+
+Le retour arrière suppose qu'aucune nouvelle transaction n'a été enregistrée dans la V3 après la migration.
+
+## 16. Sécurité des données
+
+Les éléments suivants ne doivent jamais être ajoutés au dépôt Git :
+
+- Le fichier `.env`.
+- Les bases SQLite.
+- Les sauvegardes PostgreSQL.
+- Les fichiers JSON d'exportation.
+- Les fichiers contenant des renseignements personnels.
+
+Le fichier `.env.example` contient uniquement des exemples de configuration.
+
+## 17. Conclusion
+
+La migration du schéma V2 vers V3 permet d'introduire la gestion multisite sans modifier les soldes historiques observés sous SQLite.
+
+Le transfert définitif vers PostgreSQL sera considéré comme validé uniquement après comparaison des données, réussite des tests PostgreSQL et vérification de la persistance.
