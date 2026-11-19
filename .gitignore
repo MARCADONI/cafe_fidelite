@@ -279,3 +279,12 @@ db.sqlite3
 .env
 .env.*
 .envs/
+migration_data/
+
+
+# Variables d'environnement et secrets
+.env
+.env.*
+
+# Autoriser le fichier de configuration exemple
+!.env.example

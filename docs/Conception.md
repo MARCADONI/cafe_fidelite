@@ -1,888 +1,299 @@
-# Conception — Système de fidélité pour un café
+# Conception — Évolution vers la version 3
 
-## 1. Présentation
+## 1. Objectif
 
-Cette application est un système local de gestion de fidélité destiné à un café.
+La version 3 de Café Fidélité étend la version 2 afin de permettre la gestion de plusieurs succursales d'un même réseau de cafés.
 
-Elle permet principalement :
+Les fonctionnalités existantes sont conservées. Les principales évolutions sont :
 
-* d'enregistrer et rechercher des clients ;
-* d'enregistrer les achats de cafés ;
-* de suivre la progression du programme de fidélité ;
-* d'accorder une récompense après 10 cafés achetés ;
-* d'utiliser une récompense pour obtenir un café gratuit ;
-* d'émettre des cartes prépayées contenant 11 cafés ;
-* de suivre l'utilisation des cartes prépayées.
+- La gestion de plusieurs succursales.
+- Le partage des clients et des programmes de fidélité.
+- La gestion des permissions par succursale.
+- L'introduction du rôle de propriétaire.
+- La production de rapports locaux et globaux.
+- Le remplacement de SQLite par PostgreSQL en production.
+- La conteneurisation de l'application.
 
-L'application est développée avec Python et Django et utilise SQLite comme base de données.
+## 2. Architecture applicative
 
----
+L'application conserve une architecture organisée autour de plusieurs responsabilités :
 
-## 2. Entités principales
+| Composant | Responsabilité |
+|---|---|
+| models.py | Modèle de domaine et contraintes d'intégrité |
+| services.py | Règles métier et transactions |
+| services_succursales.py | Gestion des accès aux succursales |
+| views.py | Traitement des requêtes et contrôle d'accès |
+| forms.py | Validation des formulaires |
+| templates/ | Interfaces utilisateurs |
+| admin.py | Administration du système |
+| tests.py | Validation automatisée des fonctionnalités |
 
-Le système repose sur quatre entités principales :
+La logique métier reste séparée des interfaces afin de faciliter les évolutions futures.
 
-### Client
+## 3. Modèle de domaine V3
 
-Représente un client inscrit au programme.
+### 3.1 Nouveaux modèles
 
-Attributs principaux :
+**Succursale**
 
-* `id` : identifiant unique ;
-* `nom` : nom du client ;
-* `telephone` : numéro de téléphone unique utilisé pour identifier le client ;
-* `courriel` : adresse courriel facultative ;
-* `date_creation` : date d'inscription du client.
-
-### Fidelite
-
-Représente l'état du programme de fidélité d'un client.
-
-Attributs principaux :
-
-* `id` : identifiant unique ;
-* `client` : client associé ;
-* `progression` : nombre de cafés payants comptabilisés vers la prochaine récompense ;
-* `recompenses` : nombre de cafés gratuits disponibles.
-
-Une fidélité appartient à un seul client et un client possède au maximum un état de fidélité.
-
-### Achat
-
-Représente un café enregistré dans le système.
+Représente un café appartenant au réseau.
 
 Attributs principaux :
 
-* `id` : identifiant unique ;
-* `client` : client ayant effectué l'achat ou utilisé un avantage ;
-* `type_achat` : type de l'opération ;
-* `carte_prepayee` : carte utilisée, lorsqu'il s'agit d'un café prépayé ;
-* `date_achat` : date et heure de l'opération.
+- id
+- nom
+- code
+- adresse
+- active
+- date_creation
 
-Trois types d'achats sont actuellement supportés :
+Le code identifie chaque succursale de manière unique.
 
-* `PAYANT` : achat normal faisant progresser la fidélité ;
-* `GRATUIT_FIDELITE` : café obtenu grâce à une récompense ;
-* `PREPAYE` : café consommé à partir d'une carte prépayée.
+**AffectationSuccursale**
 
-### CartePrepayee
-
-Représente une carte de 11 cafés achetée par un client.
+Représente l'affectation d'un employé à une succursale.
 
 Attributs principaux :
 
-* `id` : identifiant unique ;
-* `client` : propriétaire de la carte ;
-* `cafes_restants` : nombre de cafés encore disponibles ;
-* `date_emission` : date d'émission de la carte ;
-* `active` : indique si la carte peut encore être utilisée.
+- id
+- employe
+- succursale
+- active
+- date_affectation
 
----
+Ce modèle permet de gérer les accès sans modifier directement la structure du compte utilisateur.
 
-## 3. Diagramme entité-relation
+### 3.2 Diagramme du modèle de domaine
 
 ```mermaid
 erDiagram
     CLIENT ||--o| FIDELITE : possede
-    CLIENT ||--o{ ACHAT : effectue
     CLIENT ||--o{ CARTE_PREPAYEE : possede
-    CARTE_PREPAYEE ||--o{ ACHAT : peut_etre_utilisee_pour
+    CLIENT ||--o{ ACHAT : effectue
+    CLIENT ||--o{ MOUVEMENT_FIDELITE : concerne
 
-    CLIENT {
-        int id PK
-        string nom
-        string telephone UK
-        string courriel
-        datetime date_creation
-    }
+    SUCCURSALE ||--o{ ACHAT : enregistre
+    SUCCURSALE ||--o{ EMISSION_CARTE : enregistre
+    SUCCURSALE ||--o{ ANNULATION : concerne
+    SUCCURSALE o|--o{ JOURNAL_AUDIT : concerne
 
-    FIDELITE {
-        int id PK
-        int client_id FK
-        int progression
-        int recompenses
-    }
+    USER ||--o{ AFFECTATION_SUCCURSALE : recoit
+    SUCCURSALE ||--o{ AFFECTATION_SUCCURSALE : contient
 
-    CARTE_PREPAYEE {
-        int id PK
-        int client_id FK
-        int cafes_restants
-        datetime date_emission
-        boolean active
-    }
+    CARTE_PREPAYEE o|--o{ ACHAT : utilisee
+    CARTE_PREPAYEE ||--o| EMISSION_CARTE : origine
 
-    ACHAT {
-        int id PK
-        int client_id FK
-        string type_achat
-        int carte_prepayee_id FK
-        datetime date_achat
-    }
+    ACHAT o|--o| ANNULATION : annule
+    EMISSION_CARTE o|--o| ANNULATION : annule
+
+    ACHAT o|--o{ MOUVEMENT_FIDELITE : genere
+    ANNULATION o|--o{ MOUVEMENT_FIDELITE : genere
+
+    USER o|--o{ ACHAT : enregistre
+    USER o|--o{ ANNULATION : autorise
+    USER o|--o{ REGLE_FIDELITE : configure
+    USER o|--o{ JOURNAL_AUDIT : effectue
 ```
 
-### Cardinalités
+Une annulation concerne soit un achat, soit une émission de carte, mais jamais les deux simultanément.
 
-Les principales relations sont :
+Le diagramme présente les principales relations du domaine et ne représente pas toutes les relations secondaires héritées de la V2.
 
-* un `Client` possède au maximum une `Fidelite` ;
-* un `Client` peut avoir plusieurs `Achat` ;
-* un `Client` peut posséder plusieurs `CartePrepayee` ;
-* une `CartePrepayee` peut être associée à plusieurs `Achat` de type `PREPAYE` ;
-* un `Achat` peut ne pas avoir de carte prépayée associée.
+### 3.3 Données globales et locales
 
----
-
-## 4. Diagramme ASCII
-
-Le même modèle peut être représenté de façon simplifiée comme suit :
-
-```text
-                         ┌──────────────────────┐
-                         │        CLIENT        │
-                         ├──────────────────────┤
-                         │ id                   │
-                         │ nom                  │
-                         │ telephone (unique)   │
-                         │ courriel             │
-                         │ date_creation        │
-                         └──────────┬───────────┘
-                                    │
-                  ┌─────────────────┼─────────────────┐
-                  │ 1               │ 1               │ 1
-                  │                 │                 │
-                  │ 0..1            │ 0..N            │ 0..N
-                  ▼                 ▼                 ▼
-       ┌──────────────────┐ ┌──────────────────┐ ┌────────────────────┐
-       │     FIDELITE     │ │      ACHAT       │ │  CARTE_PREPAYEE   │
-       ├──────────────────┤ ├──────────────────┤ ├────────────────────┤
-       │ id               │ │ id               │ │ id                 │
-       │ client_id        │ │ client_id        │ │ client_id          │
-       │ progression      │ │ type_achat       │ │ cafes_restants     │
-       │ recompenses      │ │ date_achat       │ │ date_emission      │
-       └──────────────────┘ │ carte_prepayee_id│ │ active             │
-                            └────────▲─────────┘ └──────────┬─────────┘
-                                     │                      │
-                                     │       0..N           │ 1
-                                     └──────────────────────┘
-                                      achats avec la carte
-```
-
----
-
-## 5. Choix d'identification du client
-
-Le numéro de téléphone est utilisé comme principal moyen de recherche et d'identification du client.
-
-Le champ `telephone` est donc unique.
-
-Nous avons préféré le téléphone au nom, car plusieurs clients peuvent avoir le même nom. Le courriel reste facultatif afin de ne pas empêcher l'inscription d'un client qui ne souhaite pas le fournir.
-
----
-
-## 6. Programme de fidélité
-
-Le programme de fidélité et les cartes prépayées sont traités comme deux mécanismes distincts.
-
-Pour la fidélité, seuls les achats de type `PAYANT` augmentent la progression.
-
-La règle est :
-
-```text
-Achat PAYANT
-      |
-      v
-progression + 1
-      |
-      v
-progression >= 10 ?
-   /          \
- NON          OUI
-  |            |
-  v            v
-fin       progression - 10
-                |
-                v
-         recompenses + 1
-```
-
-Après 10 achats payants, une récompense est donc ajoutée au compte du client.
-
-La récompense n'est pas utilisée automatiquement.
-
-Par exemple :
-
-```text
-Avant le 10e achat :
-Progression = 9
-Récompenses = 0
-
-10e achat PAYANT :
-Progression = 0
-Récompenses = 1
-```
-
-Cette récompense reste disponible jusqu'à ce que le client décide de l'utiliser.
-
-Lorsqu'elle est utilisée :
-
-```text
-Récompenses = 1
-       |
-       v
-Utiliser une récompense
-       |
-       v
-Achat GRATUIT_FIDELITE
-       |
-       v
-Récompenses = 0
-```
-
-L'utilisation d'une récompense ne fait pas progresser le compteur de fidélité.
-
----
-
-## 7. Cartes prépayées
-
-Une carte prépayée contient initialement 11 cafés.
-
-L'application ne gère pas le paiement de la carte. Elle enregistre seulement son émission et son utilisation.
-
-À sa création :
-
-```text
-cafes_restants = 11
-active = True
-```
-
-À chaque utilisation :
-
-```text
-Utilisation de la carte
-          |
-          v
-Création Achat PREPAYE
-          |
-          v
-cafes_restants - 1
-          |
-          v
-cafes_restants == 0 ?
-       /       \
-     NON       OUI
-      |         |
-      v         v
-   Active    active = False
-```
-
-Une carte arrivée à zéro reste enregistrée afin de conserver son historique, mais elle ne peut plus être utilisée.
-
-Un même client peut posséder plusieurs cartes au cours du temps.
-
----
-
-## 8. Interaction entre fidélité et carte prépayée
-
-Nous avons choisi de ne pas faire progresser le programme de fidélité lorsqu'un café est consommé avec une carte prépayée.
-
-Les trois opérations ont donc des comportements distincts :
-
-```text
-PAYANT
-  |
-  +--> crée un Achat
-  +--> progression fidélité + 1
-
-
-GRATUIT_FIDELITE
-  |
-  +--> crée un Achat
-  +--> récompenses - 1
-  +--> progression inchangée
-
-
-PREPAYE
-  |
-  +--> crée un Achat
-  +--> cafés restants sur la carte - 1
-  +--> progression fidélité inchangée
-```
-
-Cette décision évite qu'une même consommation bénéficie à la fois du mécanisme prépayé et du mécanisme de fidélité.
-
----
-
-## 9. Organisation de la logique métier
-
-La logique métier n'est pas placée directement dans les vues Django.
-
-Elle est principalement regroupée dans `services.py`.
-
-L'architecture utilisée est :
-
-```text
-Utilisateur
-    |
-    v
-Template HTML
-    |
-    v
-views.py
-    |
-    v
-services.py
-    |
-    v
-models.py
-    |
-    v
-SQLite
-```
-
-Les vues sont principalement responsables de :
-
-* recevoir les requêtes HTTP ;
-* récupérer les informations envoyées par les formulaires ;
-* appeler les services appropriés ;
-* préparer les données pour les templates ;
-* rediriger l'utilisateur ;
-* afficher les messages de succès ou d'erreur.
-
-Les services sont responsables des règles métier telles que :
-
-```text
-enregistrer_achat_payant()
-utiliser_recompense()
-emettre_carte_prepayee()
-utiliser_carte_prepayee()
-```
-
----
-
-## 10. Principes de conception appliqués
-
-### Encapsuler ce qui varie
-
-Les règles de fidélité et de cartes prépayées sont regroupées dans `services.py`.
-
-Ces règles sont susceptibles d'évoluer davantage que l'affichage des pages.
-
-Par exemple, si le programme passe plus tard de :
-
-```text
-
-10 cafés → 1 récompense
-```
-
-à une autre règle, la modification pourra principalement être effectuée dans la couche de services.
-
-### Préférer la composition à l'héritage
-
-Nous n'avons pas créé des classes telles que :
-
-```text
-ClientFidele
-ClientAvecCarte
-ClientAvecRecompense
-```
-
-Un `Client` est plutôt associé à différents objets :
-
-```text
-Client
-  |
-  +-- Fidelite
-  |
-  +-- Achat
-  |
-  +-- CartePrepayee
-```
-
-Cette approche utilise la composition et les relations entre objets plutôt qu'une hiérarchie d'héritage inutile.
-
-### Single Responsibility Principle
-
-Les principales responsabilités sont séparées :
-
-```text
-Client
-→ informations du client
-
-Fidelite
-→ état de la fidélité
-
-Achat
-→ historique des cafés enregistrés
-
-CartePrepayee
-→ état d'une carte
-
-views.py
-→ interaction HTTP
-
-services.py
-→ règles métier
-```
-
-Cette séparation limite le nombre de raisons pour lesquelles chaque partie du système devrait être modifiée.
-
-### Open/Closed Principle
-
-La séparation entre les différents types d'achats et les services facilite l'ajout futur de nouvelles règles sans devoir réécrire entièrement les fonctionnalités existantes.
-
-L'architecture cherche donc à préparer l'extension du système sans anticiper inutilement toutes les fonctionnalités des prochains devoirs.
-
-### Autres principes SOLID
-
-Les principes de substitution de Liskov, de ségrégation des interfaces et d'inversion des dépendances ne sont pas fortement sollicités dans cette première version.
-
-Nous avons choisi de ne pas introduire artificiellement des interfaces ou des hiérarchies de classes uniquement pour démontrer ces principes.
-
-Ils pourront devenir plus pertinents lors de l'évolution du système.
-
----
-
-## 11. Décisions concernant les zones grises
-
-### Fidélité et prépayé : un ou deux mécanismes ?
-
-**Décision : deux mécanismes distincts.**
-
-La fidélité représente une récompense acquise grâce aux achats payants réguliers, tandis que la carte prépayée représente un ensemble de cafés déjà acquis à l'avance.
-
-Cette séparation rend leurs règles indépendantes et facilite leur évolution.
-
-### Café gratuit automatique ou récompense stockée ?
-
-**Décision : récompense stockée.**
-
-Après 10 achats payants, le système ajoute une récompense disponible au client.
-
-Le café gratuit n'est donc pas automatiquement consommé au prochain passage.
-
-Cette approche sépare :
-
-```text
-gagner une récompense
-```
-
-de :
-
-```text
-utiliser une récompense
-```
-
-Elle permettra également plus facilement d'ajouter ultérieurement des règles comme une date d'expiration ou différents types de récompenses.
-
-### Comment identifier un client ?
-
-**Décision : numéro de téléphone unique.**
-
-Le nom est conservé comme information descriptive et le courriel est facultatif.
-
-Le téléphone permet une recherche simple au comptoir tout en évitant l'ambiguïté de plusieurs clients portant le même nom.
-
----
-
-## 12. Évolutivité
-
-Cette première version cherche à satisfaire les besoins actuels sans prévoir prématurément toutes les fonctionnalités futures.
-
-Les choix de conception ont toutefois été faits afin que le produit puisse évoluer progressivement.
-
-La séparation entre :
-
-```text
-Client
-Fidelite
-Achat
-CartePrepayee
-services.py
-views.py
-```
-
-permet de modifier les règles métier et d'ajouter de nouvelles fonctionnalités sans concentrer toute la logique dans une seule classe ou une seule vue.
-
-# Conception — Évolution vers la version 2
-
-## 1. Objectif
-
-La version 2 de Café Fidélité étend la version 1 sans remplacer ses fonctionnalités existantes.
-
-Elle introduit six nouvelles capacités :
-
-1. Annulation des transactions.
-2. Rapports statistiques.
-3. Configuration des règles de fidélité.
-4. Effacement des renseignements personnels.
-5. Fusion des fiches clients.
-6. Authentification et permissions des employés.
-
-L'application continue de fonctionner localement avec Django et SQLite. Aucun paiement n'est traité.
-
-## 2. Architecture générale
-
-L'application conserve une architecture séparant les responsabilités :
-
-- **Modèles Django** : représentation des données persistantes.
-- **Services métier** : règles de fidélité, annulations, fusions et statistiques.
-- **Vues Django** : réception des requêtes et contrôle d'accès.
-- **Formulaires Django** : validation des données saisies.
-- **Templates** : présentation des interfaces.
-- **Tests automatisés** : vérification des règles d'affaires.
-
-Les opérations modifiant plusieurs enregistrements seront exécutées de manière atomique.
-
-## 3. Modèles de données
-
-### 3.1 Client
-
-Le modèle `Client` conserve ses informations existantes :
-
-- `id`
-- `nom`
-- `telephone`
-- `courriel`
-- `date_creation`
-
-De nouveaux champs permettront de distinguer les clients actifs, anonymisés et fusionnés.
-
-Les renseignements personnels seront effacés lors d'une anonymisation. Une fiche anonymisée ne pourra plus être utilisée pour effectuer des opérations.
-
-### 3.2 Fidelite
-
-Le modèle `Fidelite` conserve :
-
-- `client`
-- `progression`
-- `recompenses`
-
-Un mécanisme supplémentaire permettra de représenter les dettes d'étampes résultant de certaines annulations.
-
-Les soldes existants de la v1 seront conservés pendant la migration.
-
-### 3.3 Achat
-
-Le modèle `Achat` conserve :
-
-- `client`
-- `type_achat`
-- `carte_prepayee`
-- `date_achat`
-
-Il sera enrichi afin de conserver :
-
-- L'employé responsable de l'achat.
-- L'état d'annulation.
-- Les informations nécessaires pour retrouver la règle de fidélité applicable.
-- Les données nécessaires aux corrections des soldes.
-
-Les achats provenant de la v1 ne seront pas attribués artificiellement à un employé.
-
-### 3.4 CartePrepayee
-
-Le modèle `CartePrepayee` conserve :
-
-- `client`
-- `cafes_restants`
-- `date_emission`
-- `active`
-
-La v2 permettra de distinguer une carte épuisée, une carte annulée et une carte clôturée après anonymisation.
-
-Chaque carte conservera son propre solde, y compris après une fusion de clients.
-
-### 3.5 RegleFidelite
-
-Ce nouveau modèle permettra de configurer le programme de fidélité.
-
-Champs prévus :
-
-- `id`
-- `seuil`
-- `date_entree_vigueur`
-- `date_creation`
-- `cree_par`
-
-Les anciennes règles seront conservées pour interpréter les transactions historiques.
-
-### 3.6 Annulation
-
-Ce nouveau modèle conservera la trace des annulations.
-
-Champs prévus :
-
-- `id`
-- `achat` ou référence à l'opération annulée
-- `gerant`
-- `motif`
-- `date_annulation`
-
-La référence devra également permettre l'annulation de l'émission d'une carte prépayée.
-
-Une opération ne pourra être annulée qu'une seule fois.
-
-### 3.7 EmissionCarte
-
-Ce modèle représentera explicitement la vente ou l'émission d'une carte prépayée.
-
-Champs prévus :
-
-- `id`
-- `carte`
-- `employe`
-- `date_emission`
-
-Il permettra de produire les rapports de cartes vendues et de tracer leurs annulations.
-
-Pour les cartes créées en v1, la migration reconstruira les enregistrements nécessaires à partir des données disponibles, sans inventer l'identité de l'employé.
-
-### 3.8 FusionClient
-
-Ce modèle enregistrera les opérations de fusion.
-
-Champs prévus :
-
-- `id`
-- `client_principal`
-- `client_secondaire`
-- `gerant`
-- `date_fusion`
-
-Les références historiques devront être conçues pour rester compatibles avec l'anonymisation ultérieure des clients.
-
-### 3.9 Employés
-
-Nous utiliserons le modèle utilisateur intégré de Django.
-
-Deux groupes seront configurés :
-
-- `barista`
-- `gerant`
-
-Les permissions seront vérifiées côté serveur.
-
-Les gérants pourront effectuer les opérations quotidiennes ainsi que les opérations sensibles.
-
-## 4. Relations principales
-
-- Un client possède un compte de fidélité au maximum.
-- Un client peut posséder plusieurs achats.
-- Un client peut posséder plusieurs cartes prépayées.
-- Une carte prépayée peut être associée à plusieurs achats de type `PREPAYE`.
-- Une carte possède un enregistrement d'émission.
-- Un achat peut être annulé au maximum une fois.
-- Une émission de carte peut être annulée au maximum une fois.
-- Un employé peut enregistrer plusieurs transactions.
-- Un gérant peut effectuer plusieurs annulations et fusions.
-- Plusieurs règles de fidélité peuvent se succéder dans le temps.
-
-## 5. Stratégie compteurs et historique
-
-Nous conservons une architecture hybride.
-
-Les compteurs permettent une consultation rapide des soldes actuels.
-
-L'historique permet de produire des rapports, de retracer les opérations et de comprendre les annulations.
-
-Les compteurs existants de la v1 sont préservés comme état initial de référence.
-
-À partir de la v2, les modifications des compteurs et de l'historique doivent rester synchronisées.
-
-Cette décision est documentée dans l'ADR-0001.
-
-## 6. Principales règles métier
-
-### Annulations
-
-Une annulation ne supprime pas physiquement l'opération.
-
-Elle conserve le gérant responsable, la date et le motif.
-
-Les soldes sont corrigés en fonction du type d'opération annulée.
-
-### Rapports
-
-Les rapports sont calculés sur une période choisie par le gérant.
-
-Les transactions annulées sont exclues des totaux nets.
-
-Une annulation tardive corrige les rapports de la période d'origine.
-
-### Règles de fidélité
-
-Le seuil est configurable avec une date d'entrée en vigueur.
-
-Les étampes déjà accumulées et les récompenses acquises sont conservées.
-
-### Anonymisation
-
-Les renseignements personnels du client sont effacés.
-
-Les statistiques historiques restent inchangées.
-
-Les avantages non utilisés sont clôturés selon la procédure prévue.
-
-### Fusion
-
-Le gérant choisit la fiche principale.
-
-Les étampes, les récompenses et les cartes sont conservées.
-
-L'historique des achats reste exploitable.
-
-### Permissions
-
-Les baristas effectuent les opérations courantes.
-
-Les gérants peuvent également effectuer les opérations sensibles.
-
-Toutes les pages du comptoir nécessitent une authentification.
-
-## 7. Stratégie de migration v1 vers v2
-
-Les migrations de la version 1 ne seront ni supprimées ni modifiées.
-
-De nouvelles migrations ajouteront les champs et les modèles nécessaires.
-
-Les nouvelles relations vers les employés devront accepter une valeur nulle pour les anciennes opérations.
-
-La migration devra notamment :
-
-1. Conserver tous les clients existants.
-2. Conserver les compteurs de fidélité.
-3. Conserver les soldes des cartes prépayées.
-4. Conserver les achats historiques.
-5. Initialiser la règle de fidélité historique à 10 étampes.
-6. Reconstituer les émissions de cartes existantes à partir des informations disponibles.
-7. Ajouter les structures de traçabilité sans réinitialiser les soldes.
-
-La commande `python manage.py balances` permettra de vérifier les soldes avant et après la migration.
-
-Les résultats de cette vérification seront documentés dans `docs/migration.md`.
-
-## 8. Qualité et tests
-
-Les tests automatisés couvriront les règles de la v1 et les six nouvelles demandes.
-
-Ils vérifieront notamment :
-
-- La conservation des soldes après migration.
-- L'attribution des récompenses.
-- La consommation des cartes prépayées.
-- Les annulations et leurs effets.
-- Les rapports statistiques.
-- Les changements de seuil.
-- L'anonymisation des clients.
-- La fusion des fiches.
-- Les permissions des employés.
-
-Les tests pourront être exécutés avec :
-
-`python manage.py test`
-
-## 9. Décisions architecturales
-
-Les décisions sont documentées dans :
-
-- `docs/adr/0001-compteurs-et-historique.md`
-- `docs/adr/0002-annulation-transactions.md`
-- `docs/adr/0003-rapports-statistiques.md`
-- `docs/adr/0004-regles-fidelite-configurables.md`
-- `docs/adr/0005-effacement-clients.md`
-- `docs/adr/0006-fusion-clients.md`
-- `docs/adr/0007-roles-et-permissions.md`
-
-
-## 10. Traçabilité et audit des opérations — Version 2
-
-### 10.1 Objectif
-
-La version 2 de Café Fidélité introduit des mécanismes supplémentaires de traçabilité afin de faciliter la vérification des opérations et l'analyse des modifications effectuées dans le système.
-
-Deux modèles participent à cette démarche : `MouvementFidelite` et `JournalAudit`.
-
-### 10.2 Modèle MouvementFidelite
-
-Le modèle `MouvementFidelite` permet de conserver un historique des mouvements associés au programme de fidélité.
-
-Il complète les compteurs de fidélité existants en permettant de retracer les changements liés aux opérations métier.
-
-Cette approche contribue à distinguer :
-
-- L'état actuel du compte de fidélité.
-- L'historique des mouvements ayant contribué à cet état.
-
-Elle facilite la compréhension des corrections et des opérations d'annulation.
-
-### 10.3 Modèle JournalAudit
-
-Le modèle `JournalAudit` conserve une trace des opérations sensibles réalisées dans l'application.
-
-Ses principaux attributs sont :
-
-| Attribut | Rôle |
+| Données globales | Données associées à une succursale |
 |---|---|
-| `utilisateur` | Utilisateur responsable de l'action |
-| `action` | Type d'opération réalisée |
-| `objet_id` | Identifiant de l'objet concerné, lorsqu'il est disponible |
-| `description` | Description de l'opération |
-| `date_action` | Date et heure de l'enregistrement |
+| Clients | Achats payants |
+| Soldes de fidélité | Utilisations des récompenses |
+| Cartes prépayées | Consommations prépayées |
+| Règles de fidélité | Émissions de cartes |
+| Comptes utilisateurs | Annulations |
 
-Les actions auditées comprennent notamment :
+Les soldes de fidélité et les cartes prépayées appartiennent au client, indépendamment de la succursale.
 
-- La fusion de clients.
-- L'anonymisation de clients.
-- Les annulations de transactions.
-- La programmation des règles de fidélité.
+Ainsi, un client peut accumuler des étampes dans un café et utiliser sa récompense dans un autre.
 
-Le journal est conservé dans la base de données et peut être consulté à partir de l'interface de gestion prévue à cet effet.
+## 4. Gestion des permissions
 
-### 10.4 Contrôle d'accès au journal
+Trois rôles métier sont définis.
 
-La consultation du journal d'audit est réservée aux utilisateurs authentifiés disposant du rôle de gérant.
+| Fonctionnalité | Barista | Gérant | Propriétaire |
+|---|---|---|---|
+| Rechercher un client | Oui | Oui | Oui |
+| Enregistrer un achat | Oui | Oui | Oui |
+| Utiliser une récompense | Oui | Oui | Oui |
+| Émettre une carte prépayée | Oui | Oui | Oui |
+| Annuler une transaction | Non | Sa succursale | Toutes |
+| Consulter les rapports | Non | Sa succursale | Toutes |
+| Consulter le journal d'audit | Non | Sa succursale | Global |
+| Fusionner des clients | Non | Non | Oui |
+| Anonymiser un client | Non | Non | Oui |
+| Modifier les règles de fidélité | Non | Non | Oui |
+| Administrer les succursales | Non | Non | Oui |
 
-Les autorisations sont vérifiées côté serveur dans les vues Django.
+Un barista peut être affecté à plusieurs succursales. Un gérant est affecté à une seule succursale active. Le propriétaire dispose d'un accès global.
 
-Un utilisateur authentifié ne possédant pas le rôle requis ne peut pas consulter le journal.
+### 4.1 Vérifications côté serveur
 
-### 10.5 Architecture de la traçabilité
+Les permissions sont vérifiées à plusieurs niveaux :
 
-Le mécanisme repose sur la séparation entre les services métier et la persistance des données.
+1. Authentification de l'utilisateur.
+2. Vérification de son rôle.
+3. Détermination des succursales autorisées.
+4. Validation de la succursale active.
+5. Vérification de l'appartenance de la transaction à la succursale autorisée.
+6. Exécution de l'opération métier.
 
-```text
-Utilisateur
-    |
-    v
-Vue Django
-    |
-    v
-Service métier
-    |
-    +----> Modification des données
-    |
-    +----> MouvementFidelite
-    |
-    +----> JournalAudit
-                |
-                v
-              SQLite
+Les services métier effectuent également des vérifications afin de ne pas dépendre uniquement des contrôles effectués dans les interfaces.
+
+Une modification manuelle d'un identifiant dans une URL ou un formulaire ne doit pas permettre de contourner les restrictions.
+
+## 5. Gestion des transactions
+
+Chaque transaction est associée à la succursale dans laquelle elle a été réalisée.
+
+Les opérations qui modifient les soldes utilisent des transactions atomiques afin de préserver la cohérence des données.
+
+Les annulations sont associées à la succursale de la transaction originale.
+
+Les mouvements de fidélité et les journaux d'audit permettent de conserver la traçabilité des opérations.
+
+## 6. Rapports statistiques
+
+Deux niveaux de rapports sont disponibles :
+
+- Rapport local : transactions d'une succursale.
+- Rapport global : transactions de l'ensemble du réseau.
+
+Les rapports utilisent la succursale associée aux transactions et excluent les opérations annulées.
+
+Les soldes de fidélité restent globaux et ne doivent pas être additionnés plusieurs fois lorsque plusieurs succursales sont sélectionnées.
+
+## 7. Architecture de déploiement
+
+L'architecture de production locale repose sur Docker Compose et trois conteneurs :
+
+- Nginx : proxy inverse.
+- Django avec Gunicorn : serveur applicatif.
+- PostgreSQL : serveur de base de données.
+
+```mermaid
+flowchart TD
+    U[Navigateur utilisateur]
+
+    subgraph DOCKER[Docker Compose]
+        subgraph FRONTEND[Reseau frontend]
+            N[Nginx - Port 80]
+        end
+
+        A[Django et Gunicorn - Port 8000]
+
+        subgraph BACKEND[Reseau backend interne]
+            P[PostgreSQL - Port 5432]
+        end
+
+        V[(Volume postgres_data)]
+
+        N --> A
+        A --> P
+        P --> V
+    end
+
+    U -->|HTTP localhost:8000| N
 ```
 
-Les services métier centralisent les opérations et leur traçabilité.
+Le conteneur Django est connecté aux réseaux frontend et backend. PostgreSQL est uniquement connecté au réseau backend.
 
-Le journal d'audit ne remplace pas l'historique des achats ou les mouvements de fidélité : il apporte une information complémentaire sur les actions administratives sensibles.
+### 7.1 Ports et réseaux
 
-### 10.6 Bénéfices pour la qualité logicielle
+| Service | Port interne | Port publié sur l'hôte |
+|---|---|---|
+| Nginx | 80 | 127.0.0.1:8000 |
+| Django / Gunicorn | 8000 | Aucun |
+| PostgreSQL | 5432 | Aucun |
 
-Cette architecture contribue à :
+Seul Nginx est directement accessible depuis l'ordinateur hôte.
 
-- Améliorer la traçabilité des opérations.
-- Faciliter le diagnostic des anomalies.
-- Identifier l'utilisateur responsable d'une action.
-- Conserver un historique des opérations sensibles.
-- Renforcer la vérifiabilité du comportement de l'application.
+### 7.2 Chemin d'une requête
 
-Ces mécanismes participent à l'amélioration de la maintenabilité et de la qualité du système.
+1. L'utilisateur envoie une requête HTTP à Nginx.
+2. Nginx transmet la requête à Gunicorn.
+3. Django traite la requête et vérifie les permissions.
+4. Django interroge PostgreSQL si nécessaire.
+5. La réponse est retournée à l'utilisateur par Nginx.
 
-Ces documents précisent les choix retenus, les alternatives écartées et les conséquences de chaque décision.
+### 7.3 Persistance
+
+Les données PostgreSQL sont stockées dans le volume nommé postgres_data.
+
+Ce volume permet de conserver les données lors de l'arrêt ou de la recréation des conteneurs, tant qu'il n'est pas supprimé.
+
+### 7.4 Configuration et sécurité
+
+La configuration de production repose sur des variables d'environnement.
+
+Les secrets ne sont pas intégrés au dépôt Git ni à l'image Docker.
+
+L'architecture prévoit également :
+
+- DEBUG désactivé.
+- Exécution de Django avec un utilisateur non privilégié.
+- Vérifications de santé des conteneurs.
+- Application des migrations au démarrage.
+- Journaux sur la sortie standard.
+- Gestion des fichiers statiques avec WhiteNoise.
+
+Le déploiement public avec HTTPS est hors du périmètre de cette version.
+
+## 8. Migration des données
+
+Les migrations Django de la V3 prolongent celles de la V2.
+
+Les transactions historiques sont associées à la première succursale, identifiée par le code CAFE01.
+
+Le transfert vers PostgreSQL doit préserver les identifiants, les relations et les soldes des clients.
+
+La procédure détaillée et les résultats de validation sont présentés dans le document migration.md.
+
+## 9. Principes de conception
+
+### Responsabilité unique — SRP
+
+Les responsabilités liées aux transactions, aux permissions et à la présentation sont séparées.
+
+### Ouvert/Fermé — OCP
+
+L'ajout d'une succursale ne nécessite pas de modification du code métier. Une nouvelle succursale peut être créée à partir des fonctionnalités d'administration.
+
+### Encapsulation
+
+Les règles de fidélité et les opérations sensibles sont centralisées dans les services métier.
+
+### Composition
+
+Les affectations permettent d'associer les employés aux succursales sans créer une hiérarchie de classes utilisateurs pour chaque rôle.
+
+## 10. Décisions architecturales
+
+Les décisions de la V3 sont documentées dans les ADR suivants :
+
+| ADR | Sujet |
+|---|---|
+| 0008 | Gestion des succursales et des affectations |
+| 0009 | Partage des soldes et des cartes prépayées |
+| 0010 | Rôles et permissions multisites |
+| 0011 | Gestion globale des clients |
+| 0012 | Rapports locaux et globaux |
+| 0013 | Démarrage et migrations des conteneurs |
+| 0014 | Gestion des fichiers statiques |
+
+Consulter le [répertoire des ADR](adr/) pour les justifications détaillées.
+
+## 11. Limites et état de validation
+
+La version 3 ne traite aucun paiement et ne fournit pas d'interface destinée aux clients.
+
+L'architecture est conçue pour une instance applicative locale, sans réplication ni équilibrage de charge.
+
+La validation définitive du déploiement PostgreSQL, du transfert des données historiques et des tests automatisés en environnement conteneurisé reste à compléter.
