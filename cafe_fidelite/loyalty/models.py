@@ -200,9 +200,7 @@ class Achat(models.Model):
     succursale = models.ForeignKey(
     Succursale,
     on_delete=models.PROTECT,
-    null=True,
-    blank=True,
-    related_name="achats"
+    related_name="achats",
     )
     type_achat = models.CharField(
         max_length=20,
@@ -296,9 +294,7 @@ class EmissionCarte(models.Model):
     succursale = models.ForeignKey(
     Succursale,
     on_delete=models.PROTECT,
-    null=True,
-    blank=True,
-    related_name="emissions_cartes"
+    related_name="emissions_cartes",
     )
 
     employe = models.ForeignKey(
@@ -341,9 +337,7 @@ class Annulation(models.Model):
     succursale = models.ForeignKey(
     Succursale,
     on_delete=models.PROTECT,
-    null=True,
-    blank=True,
-    related_name="annulations"
+    related_name="annulations",
     )
 
     gerant = models.ForeignKey(
