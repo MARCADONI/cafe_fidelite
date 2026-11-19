@@ -272,7 +272,16 @@ Pour consulter les options disponibles :
 
 ```bash
 docker compose exec app python manage.py balances --help
+
 ```
+# Ensemble du reseau
+docker compose exec app python manage.py balances
+
+# Premier cafe
+docker compose exec app python manage.py balances --succursale CAFE01
+
+# Deuxieme cafe
+docker compose exec app python manage.py balances --succursale CAFE02
 
 ## Migration depuis la version 2
 
