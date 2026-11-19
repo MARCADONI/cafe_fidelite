@@ -1,0 +1,93 @@
+
+services:
+  db:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Variable requise}
+      POSTGRES_USER: ${POSTGRES_USER:?Variable requise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable requise}
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - backend
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DJANGO_DEBUG: "False"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    expose:
+      - "8000"
+
+    networks:
+      - frontend
+      - backend
+
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/', timeout=5)"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  nginx:
+    image: nginx:1.28.0-alpine
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8000:80"
+
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    depends_on:
+      app:
+        condition: service_healthy
+
+    networks:
+      - frontend
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1/health/ || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  frontend:
+  backend:
+    internal: true

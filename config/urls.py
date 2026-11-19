@@ -6,7 +6,30 @@ from django.urls import path
 from django.views import defaults as default_views
 from django.views.generic import TemplateView
 
+from django.db import connection, DatabaseError
+from django.http import JsonResponse
+
+def healthcheck(request):
+    """
+    Verifie que Django et PostgreSQL sont operationnels.
+    """
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+
+    except DatabaseError:
+        return JsonResponse(
+            {"status": "unhealthy"},
+            status=503,
+        )
+
+    return JsonResponse(
+        {"status": "healthy"},
+        status=200,
+    )
 urlpatterns = [
+    path("health/", healthcheck, name="healthcheck"),
     path("", TemplateView.as_view(template_name="pages/home.html"), name="home"),
     path(
         "about/",

@@ -288,3 +288,4 @@ migration_data/
 
 # Autoriser le fichier de configuration exemple
 !.env.example
+docker-compose.demo.yml
